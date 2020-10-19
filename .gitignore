@@ -1,0 +1,9 @@
+arm7/build/
+arm7/arm7.elf
+arm9/build/
+arm9/arm9.elf
+.vscode/
+wifisdio.nds
+
+dsregs.s
+wifisdio.s
