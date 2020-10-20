@@ -2,6 +2,7 @@
 #include "ndma.h"
 
 #include <stdio.h>
+#include <string.h>
 
 // Options
 
@@ -15,6 +16,7 @@
 
 // Globals
 uint32_t chip_id;
+uint8_t twlcfg_etc_buf[0x214] = {0};
 
 void sdio_controller_init(void) {
     SDIO_SOFT_RESET &= ~0b11; // Software reset, bit 1 shouldn't have any effect but FW does it as well 
@@ -334,6 +336,19 @@ uint32_t sdio_read_intern_word(uint32_t addr) {
     return sdio_read_func1word(0x474); // Read WINDOW_DATA
 }
 
+void sdio_write_intern_word(uint32_t addr, uint32_t data) {
+    uint32_t xfer_buf[0x80] = {0};
+
+    sdio_write_func1word(0x474, data); // Write WINDOW_DATA
+
+    // Send WINDOW_READ_ADDR
+    xfer_buf[0] = addr >> 8;
+    sdio_cmd53_write(xfer_buf, 0x10000478 | 1, 3); // Upper 24 bits
+
+    xfer_buf[0] = addr & 0xFF;
+    sdio_cmd53_write(xfer_buf, 0x10000478, 1); // Lower 8 bites
+}
+
 int sdio_init_opcond_if_needed(void) {
     (void)sdio_read_func0byte(FUNC0_CCCR_IRQ_FLAGS);
 
@@ -384,16 +399,60 @@ void sdio_init_func0(void) {
 
 extern void print(const char* c);
 
+
+// aka Get Host Interest Area
+uint32_t sdio_vars(void) {
+    // For some reason nocash wifiboot corrupts this area, so try to hardcode some sane defaults?
+    //uint32_t ret = *((uint32_t*)(twlcfg_etc_buf + 0x1E4));
+    uint32_t ret = 0;
+
+    switch (chip_id) {
+        case 0x2000001: ret = 0x500400; break; // AR6002
+        case 0xD000000: ret = 0x520000; break; // AR6013
+        case 0xD000001: ret = 0x520000; break; // AR6014
+        default:
+            print("sdio: Unknown CHIP ID\n");
+            while(1)
+                ;
+    }
+
+    return ret;
+}
+
+// Aka check if FW is already uploaded
+bool sdio_check_host_interest(void) {
+    // See sdio_vars for why this is commented out
+    /*uint16_t crc16 = swiCRC16(0xFFFF, twlcfg_etc_buf + 0x1E4, 0xC);
+    if(crc16 != *((uint16_t*)(twlcfg_etc_buf + 0x1E2)))
+        return true; // Need upload*/
+
+    uint32_t uploaded = sdio_read_intern_word(sdio_vars() + 0x58);
+    return (uploaded != 1);
+}
+
+void sdio_reset(void) {
+    sdio_write_intern_word(0x4000, 0x100); // Reset control, bit 8 = reset
+    swiDelay(0x10000); // Delay is needed
+    sdio_read_intern_word(0x40C0); // Reset cause
+}
+
 void sdio_atheros_init(void) {
-    uint8_t wifiboard_version;
-    readFirmware(0x1FD, &wifiboard_version, 1);
+    memcpy(twlcfg_etc_buf, (void*)0x2000400, 0x214); // Backup TWLCFGn.DAT area
+    readFirmware(0x1FD, twlcfg_etc_buf + 0x1E0, 1);
 
     sdio_controller_init(); print("sdio_controller_init()\n");
     int need_upload = sdio_init_opcond_if_needed(); print("sdio_init_opcond_if_needed()\n");
     sdio_init_func0(); print("sdio_init_func0()\n");
+    if(!need_upload) {
+        need_upload = sdio_check_host_interest();
+        print("sdio_check_host_interest()\n");
+    }
+
+    sdio_reset(); print("sdio_reset()\n");
+
 
     char s[100] = {0};
-    sprintf(s, "sdio: Board Version: v%d\n", wifiboard_version);
+    sprintf(s, "sdio: Board Version: v%d\n", twlcfg_etc_buf[0x1E0]);
     print(s);
 
     sprintf(s, "sdio: Chip ID: 0x%lx\n", chip_id);
