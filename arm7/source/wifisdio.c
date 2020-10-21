@@ -458,6 +458,44 @@ uint32_t sdio_read_mbox0word(void) {
     return sdio_read_func1word(0xFFC);
 }
 
+void sdio_check_mbox_state(uint32_t* xfer_buf) {
+    sdio_cmd53_read(xfer_buf, 0x10000400, 0xC);
+}
+
+void sdio_recv_mbox_block(uint32_t* xfer_buf) {
+    uint32_t timeout = 0x1000;
+
+    while(timeout >= 0) {
+        sdio_check_mbox_state(xfer_buf);
+        uint8_t state = ((uint8_t*)xfer_buf)[0];
+        if((state & 1) == 0) { // mbox0 not empty
+            sdio_cmd53_read(xfer_buf, 0x18001000 - 0x80, 1);
+            return;
+        }
+
+        timeout--;
+    }
+
+    // Timeout
+    return;
+}
+
+void sdio_send_mbox_block(uint8_t* xfer_buf, uint8_t* src) {
+    uint32_t* tmp = (uint32_t*)xfer_buf;
+
+    uint16_t len = ((uint16_t*)src)[2] + 6;
+    if((uintptr_t)xfer_buf != (uintptr_t)src)
+        memcpy(xfer_buf, src, len);
+    
+    xfer_buf += len;
+    src += len;
+
+    memset(xfer_buf, 0, (0u - len) & 0x7F);
+    len += 0x7F;
+    len &= ~0x7F;
+    sdio_cmd53_write(tmp, 0x18001000 - len, len >> 7); // Length to 0x80 blocks
+}
+
 void sdio_bmi_wait_count4(void) {
     while(sdio_read_func1byte(0x450) == 0)
         ;
@@ -572,6 +610,60 @@ void sdio_bmi_finish(void) {
     return;
 }
 
+uint32_t sdio_eeprom_addr;
+
+void sdio_get_eeprom_stuff(void) {
+    sdio_eeprom_addr = sdio_read_intern_word(sdio_vars() + 0x54); // HOST_RAM[0x54] hi_board_data
+    sdio_read_intern_word(sdio_eeprom_addr); // EEPROM[0] = 0x300, size maybe
+    sdio_read_intern_word(sdio_eeprom_addr + 0x10); // EEPROM[0x10], version maybe
+}
+
+void sdio_whatever_handshake(void) {
+    uint32_t xfer_buf[0x200] = {0};
+
+    // Named by launcher
+    uint8_t handshake1[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 0, 1, 0, 0, 0, 0}; // WMI_CONTROL ?
+    uint8_t handshake2[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 1, 1, 5, 0, 0, 0}; // WMI_DATA_BE best effort?
+    uint8_t handshake3[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 2, 1, 5, 0, 0, 0}; // WMI_DATA_BK background?
+    uint8_t handshake4[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 3, 1, 5, 0, 0, 0}; // WMI_DATA_VI video?
+    uint8_t handshake5[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 4, 1, 5, 0, 0, 0}; // WMI_DATA_VO voice?
+    uint8_t handshake6[] = {0, 0, 0x2, 0, 0, 0, 4, 0}; // cmd_4 WMI_SYNCHRONIZE_CMD
+
+    sdio_recv_mbox_block(xfer_buf); // HTC_MSG_READY_ID
+
+    sdio_send_mbox_block((uint8_t*)xfer_buf, handshake1);
+    sdio_recv_mbox_block(xfer_buf);
+
+    sdio_send_mbox_block((uint8_t*)xfer_buf, handshake2);
+    sdio_recv_mbox_block(xfer_buf);
+
+    sdio_send_mbox_block((uint8_t*)xfer_buf, handshake3);
+    sdio_recv_mbox_block(xfer_buf);
+
+    sdio_send_mbox_block((uint8_t*)xfer_buf, handshake4);
+    sdio_recv_mbox_block(xfer_buf);
+
+    sdio_send_mbox_block((uint8_t*)xfer_buf, handshake5);
+    sdio_recv_mbox_block(xfer_buf);
+
+    sdio_send_mbox_block((uint8_t*)xfer_buf, handshake6);
+
+    /* wifiboot does some weird assembly here? writing 1 doesn't work in any case
+        ldr r0,=010300D1h
+        mov r0, 1
+
+        0x010300D1 does work, with 0x1 it freezes on the while, DSi Browser logs also use 0x010300D1
+    */
+    sdio_write_func1word(0x418, 0x010300D1); // INT_STATUS_ENABLE, mbox0notemptyIRQ
+    sdio_write_func0byte(0x4, 0x3); // CCCR_INTERRUPT_ENABLE, enable master and func1 irqs
+
+    while((sdio_read_func0byte(0x5) & 2) == 0)
+        ;
+
+    uint32_t app_ptr = sdio_read_intern_word(sdio_vars());
+    sdio_write_intern_word(app_ptr, 2);
+}
+
 void sdio_atheros_init(void) {
     memcpy(twlcfg_etc_buf, (void*)0x2000400, 0x214); // Backup TWLCFGn.DAT area
     readFirmware(0x1FD, twlcfg_etc_buf + 0x1E0, 1);
@@ -591,6 +683,9 @@ void sdio_atheros_init(void) {
         return;
     }
     sdio_bmi_finish(); print("sdio_bmi_finish()\n");
+
+    sdio_get_eeprom_stuff(); print("sdio_get_eeprom_stuff()\n");
+    sdio_whatever_handshake(); print("sdio_whatever_handshake()\n");
 
     char s[100] = {0};
     sprintf(s, "sdio: Chip ID: 0x%lx\n", chip_id);
