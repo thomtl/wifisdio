@@ -15,7 +15,7 @@
 //#define SDIO_DMA
 
 // Globals
-uint32_t chip_id;
+uint32_t chip_id, rom_version;
 uint8_t twlcfg_etc_buf[0x214] = {0};
 
 void sdio_controller_init(void) {
@@ -323,6 +323,16 @@ uint32_t sdio_read_func1word(uint32_t addr) {
     return xfer_buf[0];
 }
 
+uint8_t sdio_read_func1byte(uint32_t addr) {
+    uint32_t xfer_buf[0x80] = {0}; // TODO: what length?
+
+    uint32_t dst = addr | (1 << 28); // Addr + func1
+    uint32_t len = 1; // len
+    sdio_cmd53_read(xfer_buf, dst, len);
+
+    return xfer_buf[0];
+}
+
 uint32_t sdio_read_intern_word(uint32_t addr) {
     uint32_t xfer_buf[0x80] = {0};
 
@@ -436,6 +446,132 @@ void sdio_reset(void) {
     sdio_read_intern_word(0x40C0); // Reset cause
 }
 
+void sdio_write_mbox0word(uint32_t data) {
+    sdio_write_func1word(0xFFC, data);
+}
+
+void sdio_cmd53_read_mbox_to_xfer_buf(uint32_t* xfer_buf, uint32_t len) {
+    sdio_cmd53_read(xfer_buf, 0x10001000 - len, len);
+}
+
+uint32_t sdio_read_mbox0word(void) {
+    return sdio_read_func1word(0xFFC);
+}
+
+void sdio_bmi_wait_count4(void) {
+    while(sdio_read_func1byte(0x450) == 0)
+        ;
+}
+
+void sdio_bmi_1_done(void) {
+    sdio_bmi_wait_count4();
+
+    sdio_write_mbox0word(0x01); // BMI_DONE, Launches firmware
+}
+
+void sdio_bmi_3_write_memory(uint32_t* src, uint32_t dst, uint32_t len) {
+    int32_t remaining = len;
+    const uint32_t max_mbox_size = 0x200 - 0xC;
+
+    uint32_t xfer_buf[0x200 / 4] = {0};
+
+    while(remaining > 0) {
+        uint32_t transfer_len = remaining;
+        if(remaining > max_mbox_size)
+            transfer_len = max_mbox_size;
+
+        memcpy(xfer_buf + 0xC, src, transfer_len);
+        sdio_bmi_wait_count4();
+
+        xfer_buf[0] = 0x3; // BMI_WRITE_MEMORY
+        xfer_buf[1] = dst;
+        xfer_buf[2] = transfer_len;
+        sdio_cmd53_write(xfer_buf, 0x10001000 - (transfer_len + 0xC), transfer_len + 0xC);
+
+        src += transfer_len;
+        dst += transfer_len;
+        remaining -= transfer_len;
+    }
+}
+
+uint32_t sdio_bmi_6_read_register(uint32_t addr) {
+    sdio_bmi_wait_count4();
+
+    uint32_t xfer_buf[0x200 / 4] = {0};
+    xfer_buf[0] = 0x6; // BMI_READ_REGISTER
+    xfer_buf[1] = addr;
+
+    sdio_cmd53_write(xfer_buf, 0x10001000 - 0x8, 0x8);
+    return sdio_read_mbox0word();
+}
+
+void sdio_bmi_7_write_register(uint32_t addr, uint32_t data) {
+    sdio_bmi_wait_count4();
+
+    uint32_t xfer_buf[0x200 / 4] = {0};
+    xfer_buf[0] = 0x7; // BMI_WRITE_REGISTER
+    xfer_buf[1] = addr;
+    xfer_buf[2] = data;
+
+    sdio_cmd53_write(xfer_buf, 0x10001000 - 0xC, 0xC);
+}
+
+uint32_t sdio_bmi_8_get_version(void) {
+    sdio_bmi_wait_count4();
+    sdio_write_mbox0word(0x8); // BMI_GET_VERSION
+    uint32_t version = sdio_read_mbox0word();
+    if(version == 0xffffffff) {
+        uint32_t len = sdio_read_mbox0word() - 4; // Total length - 4
+
+        if(len >= 0x80) {
+            print("TODO: Nonlocal xfer_buf\n");
+            return 0;
+        }
+
+        uint32_t xfer_buf[0x80] = {0};
+        sdio_cmd53_read_mbox_to_xfer_buf(xfer_buf, len);
+
+        version = xfer_buf[0]; // 1st = ROM version
+    }
+
+    return version;
+}
+
+uint32_t sdio_old_local_scratch0;
+uint32_t sdio_old_wlan_system_sleep;
+
+void sdio_bmi_init(void) {
+    rom_version = sdio_bmi_8_get_version();
+
+    uint32_t constant_2 = 0x2;
+    sdio_bmi_3_write_memory(&constant_2, sdio_vars(), 4);
+    sdio_old_local_scratch0 = sdio_bmi_6_read_register(0x180C0); // LOCAL_SCRATCH[0]
+    sdio_bmi_7_write_register(0x180C0, sdio_old_local_scratch0 | 8); // LOCAL_SCRATCH[0]
+
+    sdio_old_wlan_system_sleep = sdio_bmi_6_read_register(0x40C4); // WLAN_SYSTEM_SLEEP
+    sdio_bmi_7_write_register(0x40C4, sdio_old_wlan_system_sleep | 1); // WLAN_SYSTEM_SLEEP
+
+    sdio_bmi_7_write_register(0x4028, 0x5); // WLAN_CLOCK_CONTROL
+    sdio_bmi_7_write_register(0x4020, 0); // WLAN_CPU_CLOCK
+}
+
+void sdio_bmi_finish(void) {
+    sdio_bmi_7_write_register(0x40C4, sdio_old_wlan_system_sleep & ~1); // WLAN_SYSTEM_SLEEP
+    sdio_bmi_7_write_register(0x180C0, sdio_old_local_scratch0);
+
+    uint32_t constant_0x80 = 0x80;
+    sdio_bmi_3_write_memory(&constant_0x80, sdio_vars() + 0x6C, 4); // HOST_RAM[0x6C] hi_mbox_io_block_sz
+
+    uint32_t constant_0x63 = 0x63;
+    sdio_bmi_3_write_memory(&constant_0x63, sdio_vars() + 0x74, 4); // HOST_RAM[0x74] hi_mbox_isr_yield_limit
+
+    sdio_bmi_1_done(); // Launch Firmware
+    while(sdio_read_intern_word(sdio_vars() + 0x58) != 1) // Wait until launched
+        ;
+
+    return;
+}
+
 void sdio_atheros_init(void) {
     memcpy(twlcfg_etc_buf, (void*)0x2000400, 0x214); // Backup TWLCFGn.DAT area
     readFirmware(0x1FD, twlcfg_etc_buf + 0x1E0, 1);
@@ -449,12 +585,17 @@ void sdio_atheros_init(void) {
     }
 
     sdio_reset(); print("sdio_reset()\n");
-
+    sdio_bmi_init(); print("sdio_bmi_init()\n");
+    if(need_upload) {
+        print("sdio: Need FW Uploading, bailing..\n");
+        return;
+    }
+    sdio_bmi_finish(); print("sdio_bmi_finish()\n");
 
     char s[100] = {0};
-    sprintf(s, "sdio: Board Version: v%d\n", twlcfg_etc_buf[0x1E0]);
+    sprintf(s, "sdio: Chip ID: 0x%lx\n", chip_id);
     print(s);
 
-    sprintf(s, "sdio: Chip ID: 0x%lx\n", chip_id);
+    sprintf(s, "sdio: ROM Version: 0x%lx\n", rom_version);
     print(s);
 }
