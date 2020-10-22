@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+#include <stddef.h>
 #include <nds.h>
 
 #define SDIO_BASE 0x4004A00
@@ -39,9 +41,39 @@
 #define FUNC0_FBRn_BLOCK_SIZE_LOW(n) (((n) * 0x100) + 0x10)
 #define FUNC0_FBRn_BLOCK_SIZE_HIGH(n) (((n) * 0x100) + 0x11)
 
+// Use larger MBOX aliases
+#define FUNC1_MBOX_BASE(n) (0x800 + ((n) * 0x800))
+#define FUNC1_MBOX_LEN (0x800)
+#define FUNC1_MBOX_TOP(n) (FUNC1_MBOX_BASE((n)) + FUNC1_MBOX_LEN)
+
+#define FUNC1_INT_STATUS_ENABLE (0x418)
+
 
 
 #define GPIO_BASE 0x4004C00
 #define GPIO_WIFI (*(vu16*)(GPIO_BASE + 0x4))
 
-void sdio_atheros_init(void);
+uint8_t sdio_cmd3(uint32_t param);
+uint8_t sdio_cmd5(uint32_t param);
+uint8_t sdio_cmd7(uint32_t param);
+
+void sdio_cmd53_write(uint32_t* xfer_buf, uint32_t dst, size_t len);
+void sdio_cmd53_read(uint32_t* xfer_buf, uint32_t src, size_t len);
+
+uint8_t sdio_read_func_byte(uint8_t func, uint32_t addr);
+void sdio_write_func_byte(uint8_t func, uint32_t addr, uint8_t data);
+
+uint32_t sdio_read_func_word(uint8_t func, uint32_t addr);
+void sdio_write_func_word(uint8_t func, uint32_t addr, uint32_t data);
+
+uint32_t sdio_read_intern_word(uint32_t addr);
+void sdio_write_intern_word(uint32_t addr, uint32_t data);
+
+uint32_t sdio_vars(void);
+
+void sdio_write_mbox_word(uint8_t mbox, uint32_t data);
+uint32_t sdio_read_mbox_word(uint8_t mbox);
+void sdio_cmd53_read_mbox_to_xfer_buf(uint8_t mbox, uint32_t* xfer_buf, size_t len);
+
+void sdio_recv_mbox_block(uint8_t mbox, uint32_t* xfer_buf);
+void sdio_send_mbox_block(uint8_t mbox, uint8_t* xfer_buf, uint8_t* src);

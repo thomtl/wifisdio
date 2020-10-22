@@ -1,7 +1,8 @@
 #include <nds.h>
 #include <stdio.h>
+#include <string.h>
 
-#include "wifisdio.h"
+#include "wifisdio/wifisdio.h"
 
 volatile bool exitflag = false;
 
@@ -29,7 +30,7 @@ void init_arm7() {
 }
 
 void print(const char* c){
-	fifoSendDatamsg(FIFO_USER_01, strlen(c), c);
+	fifoSendDatamsg(FIFO_USER_01, strlen(c), (uint8_t*)c);
 }
 
 int main() {
