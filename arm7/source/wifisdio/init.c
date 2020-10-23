@@ -37,7 +37,8 @@ void sdio_controller_init(void) {
     #endif
 
     #ifdef WIFI_WITH_DSI_IRQ
-    (void)SDIO_CARD_IRQ_STAT; // Read to ACK
+    uint32_t irq_stat = SDIO_CARD_IRQ_STAT; // Read to ACK
+    (void)irq_stat;
     SDIO_CARD_IRQ_MASK &= ~1; // Unmask IRQ
     SDIO_CARD_IRQ_CTL |= 1; // Enable IRQ
     #endif
@@ -48,7 +49,8 @@ void sdio_controller_init(void) {
 }
 
 int sdio_init_opcond_if_needed(void) {
-    (void)sdio_read_func_byte(0, FUNC0_CCCR_IRQ_FLAGS);
+    uint8_t irq_flags = sdio_read_func_byte(0, FUNC0_CCCR_IRQ_FLAGS);
+    (void)irq_flags;
 
     // If it passed okay, skip cmd5, etc
     if((SDIO_IRQ_STAT & 0x400000) == 0)
@@ -56,7 +58,7 @@ int sdio_init_opcond_if_needed(void) {
 
     uint32_t known_voltages = 0;
     while(true) {
-        known_voltages &= ~0x100000; // bit20: 3.2V..3.3V
+        known_voltages &= 0x100000; // bit20: 3.2V..3.3V
 
         sdio_cmd5(known_voltages); // IO_SEND_OP_COND
 
@@ -103,7 +105,7 @@ bool sdio_check_host_interest(void) {
         return true; // Need upload*/
 
     uint32_t uploaded = sdio_read_intern_word(sdio_vars() + 0x58);
-    return (uploaded != 1);
+    return (uploaded == 1) ? 0 : 1;
 }
 
 void sdio_reset(void) {
@@ -167,22 +169,21 @@ void sdio_whatever_handshake(void) {
     uint8_t handshake6[] = {0, 0, 0x2, 0, 0, 0, 4, 0}; // cmd_4 WMI_SYNCHRONIZE_CMD
 
     sdio_recv_mbox_block(0, xfer_buf); // HTC_MSG_READY_ID
-
     sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake1);
+    
     sdio_recv_mbox_block(0, xfer_buf);
-
     sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake2);
-    sdio_recv_mbox_block(0, xfer_buf);
 
+    sdio_recv_mbox_block(0, xfer_buf);
     sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake3);
-    sdio_recv_mbox_block(0, xfer_buf);
 
+    sdio_recv_mbox_block(0, xfer_buf);
     sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake4);
-    sdio_recv_mbox_block(0, xfer_buf);
 
+    sdio_recv_mbox_block(0, xfer_buf);
     sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake5);
-    sdio_recv_mbox_block(0, xfer_buf);
 
+    sdio_recv_mbox_block(0, xfer_buf);
     sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake6);
 
     /* wifiboot does some weird assembly here? writing 1 doesn't work in any case

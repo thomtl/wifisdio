@@ -117,7 +117,7 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
     else
         cmd = 0x5C35;
 
-    if((param & (1 << 27)) && numblk == 1) // Block mode
+    if((param & (1 << 27)) && numblk != 1) // Block mode
         cmd |= 0x2000; // Multiblock, Or is that used for NDMA with FIFO32
     SDIO_CMD = cmd;
 
@@ -256,7 +256,7 @@ uint32_t sdio_read_func_word(uint8_t func, uint32_t addr) {
 
 void sdio_write_func_byte(uint8_t func, uint32_t addr, uint8_t data) {
     uint32_t xfer_buf[0x80] = {0}; // TODO: what length?
-    xfer_buf[0] = data & 0XFF;
+    xfer_buf[0] = data & 0xFF;
 
     uint32_t dst = addr | (func << 28); // Dest + func1
     uint32_t len = 1;
@@ -292,7 +292,7 @@ void sdio_write_intern_word(uint32_t addr, uint32_t data) {
 
     sdio_write_func_word(1, 0x474, data); // Write WINDOW_DATA
 
-    // Send WINDOW_READ_ADDR
+    // Send WINDOW_WRITE_ADDR
     xfer_buf[0] = addr >> 8;
     sdio_cmd53_write(xfer_buf, 0x10000478 | 1, 3); // Upper 24 bits
 
@@ -340,10 +340,10 @@ void sdio_check_mbox_state(uint32_t* xfer_buf) {
 void sdio_recv_mbox_block(uint8_t mbox, uint32_t* xfer_buf) {
     uint32_t timeout = 0x1000;
 
-    while(timeout >= 0) {
+    while(timeout > 0) {
         sdio_check_mbox_state(xfer_buf);
         uint8_t state = ((uint8_t*)xfer_buf)[0];
-        if((state & 1) == 0) { // mbox0 not empty
+        if((state & (1 << mbox)) != 0) { // mboxN not empty
             sdio_cmd53_read(xfer_buf, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - 0x80, 1);
             return;
         }
@@ -358,14 +358,14 @@ void sdio_recv_mbox_block(uint8_t mbox, uint32_t* xfer_buf) {
 void sdio_send_mbox_block(uint8_t mbox, uint8_t* xfer_buf, uint8_t* src) {
     uint32_t* tmp = (uint32_t*)xfer_buf;
 
-    uint16_t len = ((uint16_t*)src)[2] + 6;
+    uint16_t len = ((uint16_t*)src)[1] + 6;
     if((uintptr_t)xfer_buf != (uintptr_t)src)
         memcpy(xfer_buf, src, len);
     
     xfer_buf += len;
     src += len;
 
-    memset(xfer_buf, 0, (0u - len) & 0x7F);
+    memset(xfer_buf, 0, (-len) & 0x7F);
     len += 0x7F;
     len &= ~0x7F;
     sdio_cmd53_write(tmp, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - len, len >> 7); // Length to 0x80 blocks

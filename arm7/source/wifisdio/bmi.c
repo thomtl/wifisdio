@@ -27,7 +27,7 @@ void sdio_bmi_write_memory(uint32_t* src, uint32_t dst, size_t len) {
         if(remaining > max_mbox_size)
             transfer_len = max_mbox_size;
 
-        memcpy(xfer_buf + 0xC, src, transfer_len);
+        memcpy(xfer_buf + (0xC / 4), src, transfer_len);
         sdio_bmi_wait_count4();
 
         xfer_buf[0] = BMI_WRITE_MEMORY;
