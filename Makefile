@@ -13,9 +13,9 @@ export TOPDIR	:=	$(CURDIR)
 NITRO_FILES	:=
 
 # These set the information text in the nds file
-#GAME_TITLE     := My Wonderful Homebrew
-#GAME_SUBTITLE1 := built with devkitARM
-#GAME_SUBTITLE2 := http://devitpro.org
+GAME_TITLE     := wifisdio
+GAME_SUBTITLE1 := DSi WiFiSDIO Driver in C
+GAME_SUBTITLE2 := https://github.com/thomtl/wifisdio/
 
 include $(DEVKITARM)/ds_rules
 

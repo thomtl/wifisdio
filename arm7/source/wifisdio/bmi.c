@@ -21,13 +21,14 @@ void sdio_bmi_write_memory(uint32_t* src, uint32_t dst, size_t len) {
     const uint32_t max_mbox_size = 0x200 - 0xC;
 
     uint32_t xfer_buf[0x200 / 4] = {0};
+    uint8_t* data = (uint8_t*)src;
 
     while(remaining > 0) {
         uint32_t transfer_len = remaining;
         if(remaining > max_mbox_size)
             transfer_len = max_mbox_size;
 
-        memcpy(xfer_buf + (0xC / 4), src, transfer_len);
+        memcpy(xfer_buf + (0xC / 4), data, transfer_len);
         sdio_bmi_wait_count4();
 
         xfer_buf[0] = BMI_WRITE_MEMORY;
@@ -35,7 +36,7 @@ void sdio_bmi_write_memory(uint32_t* src, uint32_t dst, size_t len) {
         xfer_buf[2] = transfer_len;
         sdio_cmd53_write(xfer_buf, 0x10001000 - (transfer_len + 0xC), transfer_len + 0xC);
 
-        src += transfer_len;
+        data += transfer_len;
         dst += transfer_len;
         remaining -= transfer_len;
     }
