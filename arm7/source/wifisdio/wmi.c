@@ -238,6 +238,32 @@ void sdio_poll_mbox(uint8_t mbox) {
             len -= xtra_len;
             
             switch(event) {
+                case WMI_GET_CHANNEL_LIST_EVENT: {
+                    wmi_get_channel_list_reply_t* reply = (wmi_get_channel_list_reply_t*)params;
+                    uint32_t channel_mask = 0;
+                    for(size_t i = 0; i < reply->n_channels; i++) {
+                        uint16_t channel = reply->channel_list[i];
+
+                        channel -= 0x900;
+                        if(channel == 0xB4) {
+                            channel_mask |= (1 << 14);
+                            continue;
+                        }
+
+                        channel -= 0x6C;
+                        if(channel > 0x3C)
+                            continue;
+
+                        if((channel % 5) == 0)
+                            channel_mask |= (1 << ((channel / 5) + 1));                    
+                    }
+                    
+                    extern uint32_t regulatory_channels;
+                    regulatory_channels = channel_mask;
+
+                    print("Channel Mask: 0x%lx\n", channel_mask);
+                    break;
+                }
                 case WMI_READY_EVENT: {
                     uint8_t* mac = (uint8_t*)params;
                     print("MAC %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);

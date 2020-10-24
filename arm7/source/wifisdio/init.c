@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 // Globals
-uint32_t chip_id, rom_version, regulatory_domain;
+uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels;
 uint8_t twlcfg_etc_buf[0x214] = {0};
 uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
 

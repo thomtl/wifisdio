@@ -36,7 +36,7 @@ typedef struct {
 
 #define WMIX_HB_CHALLENGE_RESP_CMD 0x00002008
 
-
+#define WMI_GET_CHANNEL_LIST_EVENT 0xE
 #define WMI_READY_EVENT 0x1001
 #define WMI_REGDOMAIN_EVENT 0x1006
 
@@ -57,6 +57,11 @@ typedef struct {
     uint32_t time;
 } __attribute__((packed)) wmi_start_whatever_timer_cmd_t;
 
+typedef struct {
+    uint8_t reserved;
+    uint8_t n_channels;
+    uint16_t channel_list[];
+} __attribute__((packed)) wmi_get_channel_list_reply_t;
 
 
 void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_send_header_t* xfer_buf);
