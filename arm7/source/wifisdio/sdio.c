@@ -235,69 +235,59 @@ void sdio_cmd53_read(uint32_t* xfer_buf, uint32_t src, size_t len) {
 
 // TODO(thom_tl): These {read, write}_func_{byte, word} functions could probably be a tad more efficient by using CMD52 for function 0 instead of CMD53
 void sdio_write_func_word(uint8_t func, uint32_t addr, uint32_t data) {
-    uint32_t xfer_buf[0x80] = {0}; // TODO: what length?
-    xfer_buf[0] = data;
+    sdio_xfer_buf[0] = data;
 
     uint32_t dst = addr | (func << 28); // Dest + func1
     uint32_t len = 4;
 
-    sdio_cmd53_write(xfer_buf, dst, len);
+    sdio_cmd53_write(sdio_xfer_buf, dst, len);
 }
 
 uint32_t sdio_read_func_word(uint8_t func, uint32_t addr) {
-    uint32_t xfer_buf[0x80] = {0}; // TODO: what length?
-
     uint32_t dst = addr | (func << 28); // Addr + func1
     uint32_t len = 4; // len
-    sdio_cmd53_read(xfer_buf, dst, len);
+    sdio_cmd53_read(sdio_xfer_buf, dst, len);
 
-    return xfer_buf[0];
+    return sdio_xfer_buf[0];
 }
 
 void sdio_write_func_byte(uint8_t func, uint32_t addr, uint8_t data) {
-    uint32_t xfer_buf[0x80] = {0}; // TODO: what length?
-    xfer_buf[0] = data & 0xFF;
+    sdio_xfer_buf[0] = data & 0xFF;
 
     uint32_t dst = addr | (func << 28); // Dest + func1
     uint32_t len = 1;
 
-    sdio_cmd53_write(xfer_buf, dst, len);
+    sdio_cmd53_write(sdio_xfer_buf, dst, len);
 }
 
 uint8_t sdio_read_func_byte(uint8_t func, uint32_t addr) {
-    uint32_t xfer_buf[0x80] = {0}; // TODO: what length?
-
     uint32_t dst = addr | (func << 28); // Addr + func1
     uint32_t len = 1; // len
-    sdio_cmd53_read(xfer_buf, dst, len);
+    sdio_cmd53_read(sdio_xfer_buf, dst, len);
 
-    return xfer_buf[0];
+    return sdio_xfer_buf[0] & 0xFF;
 }
 
 uint32_t sdio_read_intern_word(uint32_t addr) {
-    uint32_t xfer_buf[0x80] = {0};
-
     // Send WINDOW_READ_ADDR
-    xfer_buf[0] = addr >> 8;
-    sdio_cmd53_write(xfer_buf, 0x1000047c | 1, 3); // Upper 24 bits
+    sdio_xfer_buf[0] = addr >> 8;
+    sdio_cmd53_write(sdio_xfer_buf, 0x1000047c | 1, 3); // Upper 24 bits
 
-    xfer_buf[0] = addr & 0xFF;
-    sdio_cmd53_write(xfer_buf, 0x1000047c, 1); // Lower 8 bites
+    sdio_xfer_buf[0] = addr & 0xFF;
+    sdio_cmd53_write(sdio_xfer_buf, 0x1000047c, 1); // Lower 8 bites
 
     return sdio_read_func_word(1, 0x474); // Read WINDOW_DATA
 }
 
 void sdio_write_intern_word(uint32_t addr, uint32_t data) {
-    uint32_t xfer_buf[0x80] = {0};
-
     sdio_write_func_word(1, 0x474, data); // Write WINDOW_DATA
 
     // Send WINDOW_WRITE_ADDR
-    xfer_buf[0] = addr >> 8;
-    sdio_cmd53_write(xfer_buf, 0x10000478 | 1, 3); // Upper 24 bits
+    sdio_xfer_buf[0] = addr >> 8;
+    sdio_cmd53_write(sdio_xfer_buf, 0x10000478 | 1, 3); // Upper 24 bits
 
-    xfer_buf[0] = addr & 0xFF;
-    sdio_cmd53_write(xfer_buf, 0x10000478, 1); // Lower 8 bites
+    sdio_xfer_buf[0] = addr & 0xFF;
+    sdio_cmd53_write(sdio_xfer_buf, 0x10000478, 1); // Lower 8 bites
 }
 
 // aka Get Host Interest Area
@@ -328,23 +318,23 @@ void sdio_write_mbox_word(uint8_t mbox, uint32_t data) {
     sdio_write_func_word(1, FUNC1_MBOX_TOP(mbox) - 4, data);
 }
 
-void sdio_cmd53_read_mbox_to_xfer_buf(uint8_t mbox, uint32_t* xfer_buf, size_t len) {
-    sdio_cmd53_read(xfer_buf, (0x10000000 | FUNC1_MBOX_TOP(mbox)) - len, len);
+void sdio_cmd53_read_mbox_to_xfer_buf(uint8_t mbox, size_t len) {
+    sdio_cmd53_read(sdio_xfer_buf, (0x10000000 | FUNC1_MBOX_TOP(mbox)) - len, len);
 }
 
 
-void sdio_check_mbox_state(uint32_t* xfer_buf) {
-    sdio_cmd53_read(xfer_buf, 0x10000400, 0xC);
+void sdio_check_mbox_state(void) {
+    sdio_cmd53_read(sdio_xfer_buf, 0x10000400, 0xC);
 }
 
-void sdio_recv_mbox_block(uint8_t mbox, uint32_t* xfer_buf) {
+void sdio_recv_mbox_block(uint8_t mbox) {
     uint32_t timeout = 0x1000;
 
     while(timeout > 0) {
-        sdio_check_mbox_state(xfer_buf);
-        uint8_t state = ((uint8_t*)xfer_buf)[0];
+        sdio_check_mbox_state();
+        uint8_t state = ((uint8_t*)sdio_xfer_buf)[0];
         if((state & (1 << mbox)) != 0) { // mboxN not empty
-            sdio_cmd53_read(xfer_buf, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - 0x80, 1);
+            sdio_cmd53_read(sdio_xfer_buf, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - 0x80, 1);
             return;
         }
 
@@ -355,18 +345,18 @@ void sdio_recv_mbox_block(uint8_t mbox, uint32_t* xfer_buf) {
     return;
 }
 
-void sdio_send_mbox_block(uint8_t mbox, uint8_t* xfer_buf, uint8_t* src) {
-    uint32_t* tmp = (uint32_t*)xfer_buf;
+void sdio_send_mbox_block(uint8_t mbox, uint8_t* src) {
+    uint8_t* tmp = (uint8_t*)sdio_xfer_buf;
 
     uint16_t len = ((uint16_t*)src)[1] + 6;
-    if((uintptr_t)xfer_buf != (uintptr_t)src)
-        memcpy(xfer_buf, src, len);
+    if((uintptr_t)sdio_xfer_buf != (uintptr_t)src)
+        memcpy(tmp, src, len);
     
-    xfer_buf += len;
+    tmp += len;
     src += len;
 
-    memset(xfer_buf, 0, (-len) & 0x7F);
+    memset(tmp, 0, (-len) & 0x7F);
     len += 0x7F;
     len &= ~0x7F;
-    sdio_cmd53_write(tmp, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - len, len >> 7); // Length to 0x80 blocks
+    sdio_cmd53_write(sdio_xfer_buf, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - len, len >> 7); // Length to 0x80 blocks
 }

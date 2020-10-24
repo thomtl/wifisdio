@@ -1,13 +1,15 @@
 #include "wifisdio.h"
 #include "sdio.h"
 #include "bmi.h"
+#include "wmi.h"
 
 #include <string.h>
 #include <stdio.h>
 
 // Globals
-uint32_t chip_id, rom_version;
+uint32_t chip_id, rom_version, regulatory_domain;
 uint8_t twlcfg_etc_buf[0x214] = {0};
+uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
 
 void sdio_controller_init(void) {
     SDIO_SOFT_RESET &= ~0b11; // Software reset, bit 1 shouldn't have any effect but FW does it as well 
@@ -83,6 +85,7 @@ int sdio_init_opcond_if_needed(void) {
 }
 
 void sdio_init_func0(void) {
+    //sdio_write_func_byte(0, FUNC0_CCCR_IRQ_FLAGS, 0); // Disable all IRQs, wifiboot does not leave dsiwifi in a compatible state to unlaunch, so we have to explicitly disable these
     sdio_write_func_byte(0, FUNC0_CCCR_POWER_CONTROL, 0x02); // CCCR Power Control
     sdio_write_func_byte(0, FUNC0_CCCR_BUS_INTERFACE, 0x82); // CCCR Bus Interface
     sdio_write_func_byte(0, FUNC0_CCCR_CARD_CAPS, 0x17); // CCCR Card Capabilities
@@ -157,9 +160,8 @@ void sdio_get_eeprom_stuff(void) {
     sdio_read_intern_word(sdio_eeprom_addr + 0x10); // EEPROM[0x10], version maybe
 }
 
+// Maybe called BootInfo Handshake, Or HTC_SERVICES handshake
 void sdio_whatever_handshake(void) {
-    uint32_t xfer_buf[0x200] = {0};
-
     // Named such by launcher
     uint8_t handshake1[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 0, 1, 0, 0, 0, 0}; // WMI_CONTROL ?
     uint8_t handshake2[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 1, 1, 5, 0, 0, 0}; // WMI_DATA_BE best effort
@@ -168,23 +170,23 @@ void sdio_whatever_handshake(void) {
     uint8_t handshake5[] = {0, 0, 0x8, 0, 0, 0, 2, 0, 4, 1, 5, 0, 0, 0}; // WMI_DATA_VO voice
     uint8_t handshake6[] = {0, 0, 0x2, 0, 0, 0, 4, 0}; // cmd_4 WMI_SYNCHRONIZE_CMD
 
-    sdio_recv_mbox_block(0, xfer_buf); // HTC_MSG_READY_ID
-    sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake1);
+    sdio_recv_mbox_block(0); // HTC_MSG_READY_ID
+    sdio_send_mbox_block(0, handshake1);
     
-    sdio_recv_mbox_block(0, xfer_buf);
-    sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake2);
+    sdio_recv_mbox_block(0);
+    sdio_send_mbox_block(0, handshake2);
 
-    sdio_recv_mbox_block(0, xfer_buf);
-    sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake3);
+    sdio_recv_mbox_block(0);
+    sdio_send_mbox_block(0, handshake3);
 
-    sdio_recv_mbox_block(0, xfer_buf);
-    sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake4);
+    sdio_recv_mbox_block(0);
+    sdio_send_mbox_block(0, handshake4);
 
-    sdio_recv_mbox_block(0, xfer_buf);
-    sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake5);
+    sdio_recv_mbox_block(0);
+    sdio_send_mbox_block(0, handshake5);
 
-    sdio_recv_mbox_block(0, xfer_buf);
-    sdio_send_mbox_block(0, (uint8_t*)xfer_buf, handshake6);
+    sdio_recv_mbox_block(0);
+    sdio_send_mbox_block(0, handshake6);
 
     /* wifiboot does some weird assembly here? writing 1 doesn't work in any case
         ldr r0,=010300D1h
@@ -225,10 +227,33 @@ void sdio_atheros_init(void) {
     sdio_get_eeprom_stuff(); print("sdio_get_eeprom_stuff()\n");
     sdio_whatever_handshake(); print("sdio_whatever_handshake()\n");
 
-    char s[100] = {0};
-    sprintf(s, "sdio: Chip ID: 0x%lx\n", chip_id);
-    print(s);
+    print("sdio: Chip ID: 0x%lx\n", chip_id);
+    print("sdio: ROM Version: 0x%lx\n", rom_version);
+}
 
-    sprintf(s, "sdio: ROM Version: 0x%lx\n", rom_version);
-    print(s);
+void sdio_prepare_scanning(void) {
+    sdio_wmi_error_report_cmd(0, 0x7F); print("sdio_wmi_error_report()\n");
+    sdio_wmi_start_whatever_timer_cmd(0, 2); print("sdio_wmi_start_whatever_timer()\n");
+    sdio_wmi_get_channel_list_cmd(0); print("sdio_wmi_get_channel_list()\n");
+    sdio_poll_mbox(0); print("sdio_poll_mbox()\n");
+}
+
+volatile bool is_running = false;
+
+void sdio_irq_handler(void) {
+    if(!is_running)
+        return;
+    
+    sdio_poll_mbox(0);
+}
+
+void sdio_init(void) {
+    powerOn(1 << 1); // Power up DSWIFI, is this really needed?
+    irqSetAUX(IRQ_SDIOWIFI, sdio_irq_handler);
+    irqEnableAUX(IRQ_SDIOWIFI);
+
+    sdio_atheros_init();
+    sdio_prepare_scanning();
+
+    is_running = true;
 }

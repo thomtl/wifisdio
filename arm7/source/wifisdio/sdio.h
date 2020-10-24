@@ -48,6 +48,7 @@
 
 #define FUNC1_INT_STATUS_ENABLE (0x418)
 
+#define IRQ_SDIOWIFI (1 << 11)
 
 
 #define GPIO_BASE 0x4004C00
@@ -73,7 +74,9 @@ uint32_t sdio_vars(void);
 
 void sdio_write_mbox_word(uint8_t mbox, uint32_t data);
 uint32_t sdio_read_mbox_word(uint8_t mbox);
-void sdio_cmd53_read_mbox_to_xfer_buf(uint8_t mbox, uint32_t* xfer_buf, size_t len);
+void sdio_cmd53_read_mbox_to_xfer_buf(uint8_t mbox, size_t len);
 
-void sdio_recv_mbox_block(uint8_t mbox, uint32_t* xfer_buf);
-void sdio_send_mbox_block(uint8_t mbox, uint8_t* xfer_buf, uint8_t* src);
+void sdio_recv_mbox_block(uint8_t mbox);
+void sdio_send_mbox_block(uint8_t mbox, uint8_t* src);
+
+void sdio_check_mbox_state(void);

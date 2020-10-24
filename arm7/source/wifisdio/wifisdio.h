@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 // Options
 
 //#define TRY_SDIO_DATA32_MODE
@@ -10,6 +12,9 @@
 
 //#define SDIO_DMA
 
-extern void print(const char* s);
+extern void print(const char* s, ...);
+extern void panic(const char* s, ...);
 
-void sdio_atheros_init(void);
+extern uint32_t sdio_xfer_buf[];
+
+void sdio_init(void);
