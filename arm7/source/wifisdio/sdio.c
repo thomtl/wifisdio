@@ -98,12 +98,12 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
         NDMAxWCNT(0) = 0x80 / 4;
         NDMAxBCNT(0) = 0;
 
-        uint32_t command = 0;
-        command |= (2 << ((param & (1 << 31)) ? 10 : 13)); // Set SDIO_DATA32 increment mode to fixed
-        command |= (5 << 16); // Physical Block Size
-        command |= (9 << 24); // DSiWIFI Startup Mode
-        command |= (0 << 29); // Repeat until NDMAxTCNT
-        command |= (1 << 31); // Enable
+        uint32_t command = NDMA_BLOCK_SIZE(5) | NDMA_START_SDIO | NDMA_REPEAT_TCNT | NDMA_ENABLE;
+        if(param & (1 << 31))
+            command |= (NDMA_DST_FIX | NDMA_SRC_INC);
+        else
+            command |= (NDMA_DST_INC | NDMA_SRC_FIX);
+
         NDMAxCNT(0) = command;
     } else {
         SDIO_DATA_CTL = 0; // Want DATA16 mode
@@ -122,7 +122,7 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
     SDIO_CMD = cmd;
 
     while(1) {
-        uint32_t irq_stat = SDIO_IRQ_STAT;
+        irq_stat = SDIO_IRQ_STAT;
         if(irq_stat & 0x7f0000)
             return -1;
         
@@ -137,7 +137,7 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
     #if defined(TRY_SDIO_DATA32_MODE) || defined(TRY_SDIO_NDMA)
     if((SDIO_DATA_CTL & 2) && (SDIO_IRQ32 & 2)) {
         // Wait for NDMA transfer to finish or an error
-        while(NDMAxCNT(0) & (1 << 31)) {
+        while(NDMAxCNT(0) & NDMA_BUSY) {
             if(SDIO_IRQ_STAT & 0x7f0000)
                 return -1;
         }
@@ -146,7 +146,7 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
     {
         if(param & (1 << 31)) { // Writeflag
             while(true) {
-                uint32_t irq_stat = SDIO_IRQ_STAT;
+                irq_stat = SDIO_IRQ_STAT;
                 if(irq_stat & 0x7f0000)
                     return -1;
 
@@ -170,7 +170,7 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
             #endif
         } else {
             while(true) {
-                uint32_t irq_stat = SDIO_IRQ_STAT;
+                irq_stat = SDIO_IRQ_STAT;
                 if(irq_stat & 0x7f0000)
                     return -1;
 
@@ -197,7 +197,7 @@ int sdio_cmd53_access_inj(uint32_t* xfer_buf, uint32_t param, uint32_t len) {
 
     // Wait for Data End, apparently works better with it
     while(true) {
-        uint32_t irq_stat = SDIO_IRQ_STAT;
+        irq_stat = SDIO_IRQ_STAT;
         if(irq_stat & 0x7f0000)
             return -1;
 
@@ -218,7 +218,8 @@ void sdio_cmd53_write(uint32_t* xfer_buf, uint32_t dst, size_t len) {
     param |= (1 << 31); // Set Write
     param |= (len & ~0x200); // Crop len and write to bit 0 - 8
     
-    sdio_cmd53_access_inj(xfer_buf, param, len);
+    if(sdio_cmd53_access_inj(xfer_buf, param, len) == -1)
+        panic("sdio_cmd53_write: Access failed\n");
 }
 
 void sdio_cmd53_read(uint32_t* xfer_buf, uint32_t src, size_t len) {
@@ -230,7 +231,8 @@ void sdio_cmd53_read(uint32_t* xfer_buf, uint32_t src, size_t len) {
     param |= (1 << 26); // Set Incrementing
     param |= (len & ~0x200); // Crop len and write to bit 0 - 8
     
-    sdio_cmd53_access_inj(xfer_buf, param, len);
+    if(sdio_cmd53_access_inj(xfer_buf, param, len) == -1)
+        panic("sdio_cmd53_read: Access failed\n");
 }
 
 // TODO(thom_tl): These {read, write}_func_{byte, word} functions could probably be a tad more efficient by using CMD52 for function 0 instead of CMD53
@@ -271,7 +273,7 @@ uint8_t sdio_read_func_byte(uint8_t func, uint32_t addr) {
 uint32_t sdio_read_intern_word(uint32_t addr) {
     // Send WINDOW_READ_ADDR
     sdio_xfer_buf[0] = addr >> 8;
-    sdio_cmd53_write(sdio_xfer_buf, 0x1000047c | 1, 3); // Upper 24 bits
+    sdio_cmd53_write(sdio_xfer_buf, 0x1000047c + 1, 3); // Upper 24 bits
 
     sdio_xfer_buf[0] = addr & 0xFF;
     sdio_cmd53_write(sdio_xfer_buf, 0x1000047c, 1); // Lower 8 bites
@@ -284,7 +286,7 @@ void sdio_write_intern_word(uint32_t addr, uint32_t data) {
 
     // Send WINDOW_WRITE_ADDR
     sdio_xfer_buf[0] = addr >> 8;
-    sdio_cmd53_write(sdio_xfer_buf, 0x10000478 | 1, 3); // Upper 24 bits
+    sdio_cmd53_write(sdio_xfer_buf, 0x10000478 + 1, 3); // Upper 24 bits
 
     sdio_xfer_buf[0] = addr & 0xFF;
     sdio_cmd53_write(sdio_xfer_buf, 0x10000478, 1); // Lower 8 bites
@@ -294,20 +296,17 @@ void sdio_write_intern_word(uint32_t addr, uint32_t data) {
 uint32_t sdio_vars(void) {
     // For some reason nocash wifiboot corrupts this area, so try to hardcode some sane defaults?
     //uint32_t ret = *((uint32_t*)(twlcfg_etc_buf + 0x1E4));
-    uint32_t ret = 0;
 
     extern uint32_t chip_id; // TODO: More elegant
     switch (chip_id) {
-        case 0x2000001: ret = 0x500400; break; // AR6002
-        case 0xD000000: ret = 0x520000; break; // AR6013
-        case 0xD000001: ret = 0x520000; break; // AR6014
-        default:
-            print("sdio: Unknown CHIP ID\n");
-            while(1)
-                ;
+        case 0x2000001: return 0x500400; // AR6002
+        case 0xD000000: return 0x520000; // AR6013
+        case 0xD000001: return 0x520000; // AR6014
+        default: 
+            panic("sdio: Unknown CHIP ID 0x%x\n", chip_id);
     }
 
-    return ret;
+    return 0;
 }
 
 uint32_t sdio_read_mbox_word(uint8_t mbox) {
@@ -341,14 +340,13 @@ void sdio_recv_mbox_block(uint8_t mbox) {
         timeout--;
     }
 
-    // Timeout
-    return;
+    panic("sdio_recv_mbox_block: Timeout\n");
 }
 
 void sdio_send_mbox_block(uint8_t mbox, uint8_t* src) {
     uint8_t* tmp = (uint8_t*)sdio_xfer_buf;
 
-    uint16_t len = ((uint16_t*)src)[1] + 6;
+    uint32_t len = ((uint16_t*)src)[1] + 6;
     if((uintptr_t)sdio_xfer_buf != (uintptr_t)src)
         memcpy(tmp, src, len);
     

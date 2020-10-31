@@ -29,7 +29,12 @@ typedef struct {
 
 #define PROTOCOL_ETHER_EAPOL 0x8e88 // TODO: Move this somewhere else
 
+#define WMI_START_SCAN_CMD 0x7
+#define WMI_SET_SCAN_PARAMS_CMD 0x8
+#define WMI_SET_BSS_FILTER_CMD 0x9
+#define WMI_SET_PROBED_SSID_CMD 0xA
 #define WMI_GET_CHANNEL_LIST_CMD 0xE
+#define WMI_SET_CHANNEL_PARAMS_CMD 0x11
 #define WMI_TARGET_ERROR_REPORT_BITMASK_CMD 0x22
 #define WMI_EXTENSION_CMD 0x2E // Prefix for WMIX cmds
 #define WMI_START_WHATEVER_TIMER_CMD 0x47 // Seems to be Nintendo specific
@@ -38,7 +43,67 @@ typedef struct {
 
 #define WMI_GET_CHANNEL_LIST_EVENT 0xE
 #define WMI_READY_EVENT 0x1001
+#define WMI_BSSINFO_EVENT 0x1004
 #define WMI_REGDOMAIN_EVENT 0x1006
+#define WMI_SCAN_COMPLETE_EVENT 0x100A
+#define WMI_EXTENSION_EVENT 0x1010
+
+#define WMIX_HB_CHALLENGE_RESP_EVENT 0x3007
+#define WMIX_DBGLOG_EVENT 0x3008
+
+#define SCAN_TYPE_LONG 0x0
+#define SCAN_TYPE_SHORT 0x1
+
+#define BSS_FILTER_NONE 0x0
+#define BSS_FILTER_ALL 0x1
+#define BSS_FILTER_PROFILE 0x2
+#define BSS_FILTER_ALL_BUT_PROFILE 0x3
+#define BSS_FILTER_CURRENT_BSS 0x4
+#define BSS_FILTER_ALL_BUT_CURRENT_BSS 0x5
+#define BSS_FILTER_PROBED_SSID 0x6
+
+#define SSID_PROBE_FLAG_DISABLE 0x0
+#define SSID_PROBE_FLAG_SPECIFIC 0x1
+#define SSID_PROBE_FLAG_ANY 0x2
+
+#define SCAN_FLAGS_CONNECT (1 << 0)
+#define SCAN_FLAGS_CONNECTED (1 << 1)
+#define SCAN_FLAGS_ACTIVE (1 << 2)
+#define SCAN_FLAGS_ROAM (1 << 3)
+#define SCAN_FLAGS_BSSINFO (1 << 4)
+#define SCAN_FLAGS_ENABLE_AUTO (1 << 5)
+#define SCAN_FLAGS_ENABLE_ABORT (1 << 6)
+
+#define PHY_MODE_11A 0x1
+#define PHY_MODE_11G 0x2
+#define PHY_MODE_11AG 0x3
+#define PHY_MODE_11B 0x4
+#define PHY_MODE_11G_ONLY 0x5
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint32_t force_fg_scan;
+    uint32_t is_legacy;
+    uint32_t home_dwell_time;
+    uint32_t force_scan_time;
+    uint8_t scan_type;
+    uint8_t n_channels;
+    uint16_t channels[1];
+} __attribute__((packed)) wmi_start_scan_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint16_t fg_start_period;
+    uint16_t fg_end_period;
+    uint16_t bg_period;
+    uint16_t maxact_chdwell_time;
+    uint16_t pas_chdwell_time;
+    uint8_t short_scan_ratio;
+    uint8_t scan_control_flags;
+    uint16_t minact_chdwell_time;
+    uint16_t maxact_scan_per_ssid;
+    uint32_t max_dfsch_act_time;
+} __attribute__((packed)) wmi_set_scan_params_cmd_t;
 
 typedef struct {
     wmi_mbox_send_header_t header;
@@ -46,6 +111,31 @@ typedef struct {
     uint32_t cookie;
     uint32_t source; 
 } __attribute__((packed)) wmix_hb_challenge_resp_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t bss_filter;
+    uint8_t reserved1;
+    uint16_t reserved2;
+    uint32_t ie_mask;
+} __attribute__((packed)) wmi_set_bss_filter_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t index;
+    uint8_t flag;
+    uint8_t ssid_length;
+    char ssid[32];
+} __attribute__((packed)) wmi_set_probed_ssid_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t reserved;
+    uint8_t scan_param;
+    uint8_t phy_mode;
+    uint8_t num_channels;
+    uint16_t channels[32];
+} __attribute__((packed)) wmi_set_channel_params_cmd_t;
 
 typedef struct {
     wmi_mbox_send_header_t header;
@@ -63,6 +153,20 @@ typedef struct {
     uint16_t channel_list[];
 } __attribute__((packed)) wmi_get_channel_list_reply_t;
 
+typedef struct {
+    uint16_t channel;
+    uint8_t frame_type;
+    uint8_t snr;
+    uint16_t rssi;
+    uint8_t bssid[6];
+    uint32_t ie_mask;
+    uint8_t body[];
+} __attribute__((packed)) wmi_bssinfo_event_t;
+
+typedef struct {
+    uint32_t status;
+} __attribute__((packed)) wmi_scan_complete_event_t;
+
 
 void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_send_header_t* xfer_buf);
 void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_send_header_t* xfer_buf);
@@ -72,6 +176,13 @@ void sdio_tx_callback(void);
 
 void sdio_poll_mbox(uint8_t mbox);
 
+void sdio_wmi_start_scan_cmd(uint8_t mbox, uint8_t type);
+void sdio_wmi_set_scan_params_cmd(uint8_t mbox, wmi_set_scan_params_cmd_t* cmd);
+void sdio_wmi_set_bss_filter_cmd(uint8_t mbox, uint8_t bss_filter, uint32_t ie_mask);
+void sdio_wmi_set_probed_ssid_cmd(uint8_t mbox, uint8_t flag, char* ssid);
+void sdio_wmi_set_channel_params_cmd(uint8_t mbox, uint8_t scan_param, uint8_t phy_mode, uint8_t n_channels, uint16_t* channels);
 void sdio_wmi_get_channel_list_cmd(uint8_t mbox);
 void sdio_wmi_error_report_cmd(uint8_t mbox, uint32_t bitmask);
 void sdio_wmi_start_whatever_timer_cmd(uint8_t mbox, uint32_t time);
+
+void sdio_wmi_scan_channel(void);

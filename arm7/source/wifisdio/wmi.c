@@ -1,12 +1,15 @@
 #include "wifisdio.h"
 #include "wmi.h"
+#include "wifi.h"
 
 #include "sdio.h"
 
 #include <stdio.h>
+#include <string.h>
 
 uint8_t ath_cmd_ack_pending = 0;
 uint8_t ath_data_ack_pending = 0;
+uint8_t ath_await_scan_complete = 0;
 
 uint32_t ath_lookahead_value = 0;
 uint8_t ath_lookahead_flag = 0;
@@ -16,7 +19,7 @@ uint32_t** curr_wpa_tx_callback_list_ptr = NULL;
 
 void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_send_header_t* cmd) {
     sdio_send_mbox_block(mbox, (uint8_t*)cmd);
-    ath_cmd_ack_pending = (cmd->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? 1 : 0;
+    ath_cmd_ack_pending = (cmd->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? (1) : (0);
 }
 
 void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_send_header_t* cmd) {
@@ -25,7 +28,7 @@ void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_send_header_t* cmd) {
     } while (ath_cmd_ack_pending != 0);
 
     sdio_send_mbox_block(mbox, (uint8_t*)cmd);
-    ath_cmd_ack_pending = (cmd->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? 1 : 0;
+    ath_cmd_ack_pending = (cmd->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? (1) : (0);
 }
 
 
@@ -40,8 +43,6 @@ void sdio_heartbeat(uint8_t mbox) {
         return;
 
     recent_heartbeat = arm7_count_60hz;
-
-    print("Heartbeat\n");
 
     wmix_hb_challenge_resp_cmd_t cmd = {0};
     cmd.header.type = MBOX_SEND_TYPE_WMI;
@@ -94,13 +95,13 @@ void sdio_poll_mbox(uint8_t mbox) {
     const uint8_t max_polls_per_call = 10;
     for(size_t i = 0; i < max_polls_per_call; i++) {
         sdio_heartbeat(mbox);
-        sdio_tx_callback();
+        //sdio_tx_callback();
         sdio_Wifi_Intr_TxEnd();
 
         if(ath_lookahead_flag == 0) {
             sdio_check_mbox_state();
             uint8_t host_int_status = ((uint8_t*)sdio_xfer_buf)[0];
-            uint8_t mbox_frame = ((uint8_t*)sdio_xfer_buf)[4];
+            uint8_t mbox_frame = 1;//((uint8_t*)sdio_xfer_buf)[4];
             uint8_t rx_lookahead_valid = ((uint8_t*)sdio_xfer_buf)[5];
             uint32_t rx_lookahead0 = sdio_xfer_buf[2]; // TODO(thom_tl): This is hardcoded for MBOX0, fix that
 
@@ -126,28 +127,16 @@ void sdio_poll_mbox(uint8_t mbox) {
         size += 0x7F;
         size &= ~0x7F;
 
-        if(size > 0x200) {
-            leaveCriticalSection(old_ime);
-            panic("sdio_poll_mbox(): TODO: Global sdio_xfer_buf\n");
-        }
-
         sdio_cmd53_read(sdio_xfer_buf, (0x18000000 | FUNC1_MBOX_TOP(mbox)) - size, size >> 7);
-
-
         ath_lookahead_flag = 0;
 
         wmi_mbox_recv_header_t* header = (wmi_mbox_recv_header_t*)sdio_xfer_buf;
-        if(header->flags == 0 && !(header->flags & MBOX_RECV_FLAGS_HAS_ACK)) {
-            leaveCriticalSection(old_ime);
-            panic("sdio_poll_mbox(): Invalid header->flags\n");
-        }
+        if(header->flags & MBOX_RECV_FLAGS_HAS_ACK) {
+            if(header->ack_len > header->len) {
+                leaveCriticalSection(old_ime);
+                panic("sdio_poll_mbox(): header->ack_len (%x) > header->len (%x)\n", header->ack_len, header->len);
+            }
 
-        if(header->ack_len > header->len) {
-            leaveCriticalSection(old_ime);
-            panic("sdio_poll_mbox(): header->ack_len > header->len\n");
-        }
-
-        if(header->flags != 0 && header->ack_len != 0) {
             uint8_t* ack_list = (uint8_t*)(((uintptr_t)header) + ((header->len - header->ack_len) + 6));
             size_t ack_len = header->ack_len;
 
@@ -241,8 +230,8 @@ void sdio_poll_mbox(uint8_t mbox) {
                 case WMI_GET_CHANNEL_LIST_EVENT: {
                     wmi_get_channel_list_reply_t* reply = (wmi_get_channel_list_reply_t*)params;
                     uint32_t channel_mask = 0;
-                    for(size_t i = 0; i < reply->n_channels; i++) {
-                        uint16_t channel = reply->channel_list[i];
+                    for(size_t j = 0; j < reply->n_channels; j++) {
+                        uint16_t channel = reply->channel_list[j];
 
                         channel -= 0x900;
                         if(channel == 0xB4) {
@@ -251,7 +240,7 @@ void sdio_poll_mbox(uint8_t mbox) {
                         }
 
                         channel -= 0x6C;
-                        if(channel > 0x3C)
+                        if(channel > (0x9a8 - 0x96c))
                             continue;
 
                         if((channel % 5) == 0)
@@ -270,6 +259,56 @@ void sdio_poll_mbox(uint8_t mbox) {
 
                     break;
                 }
+                case WMI_BSSINFO_EVENT: {
+                    wmi_bssinfo_event_t* info = (wmi_bssinfo_event_t*)params;
+                    sgBeacon_t beacon = {0};
+
+                    beacon.strength = info->snr;
+                    memcpy(beacon.sa, info->bssid, 6);
+                    memcpy(beacon.bssid, info->bssid, 6);
+
+                    len -= sizeof(sgBeacon_t);
+
+                    uint32_t flags = sgWifiAp_FLAGS_ACTIVE | sgWifiAp_FLAGS_COMPATIBLE;
+                    if(memcmp(beacon.sa, beacon.bssid, 6) != 0)
+                        flags |= sgWifiAp_FLAGS_ADHOC;
+                    if(len < (8 + 2))
+                        break;
+
+                    len -= 8; // Skip Timestamp
+                    len -= 2; // Skip BeaconInterval
+
+                    if(len < 2)
+                        break;
+                    
+                    uint16_t capability = info->body[8 + 2] | (info->body[8 + 2 + 1]);
+                    len -= 2; // Skip Capability
+
+                    if(capability & 0x10)
+                        flags |= sgWifiAp_FLAGS_WEP;
+
+                    /*uint8_t ssid_len = 0;
+                    char* ssid = NULL;
+
+                    uint32_t rateset;
+                    extern uint16_t current_channel;
+                    uint16_t channel = current_channel;*/
+
+                    // TODO(thom_tl): finish scan_beacon_lop
+
+                    for(size_t j = (8 + 2 + 2); j < len;) {
+                        uint8_t item_type = info->body[j++];
+                        uint8_t item_len = info->body[j++];
+
+                        if(item_type == 0) {
+                            print("SSID: %.*s\n", item_len, &info->body[j]);
+                        }
+
+                        j += item_len;
+                    }
+
+                    break;
+                }
                 case WMI_REGDOMAIN_EVENT: {
                     uint8_t* regdomain_ptr = (uint8_t*)params;
                     uint32_t regdomain = regdomain_ptr[0] | (regdomain_ptr[1] << 8) | (regdomain_ptr[2] << 16) | (regdomain_ptr[3] << 24);
@@ -280,9 +319,32 @@ void sdio_poll_mbox(uint8_t mbox) {
                     regulatory_domain = regdomain;
                     break;
                 }
+                case WMI_SCAN_COMPLETE_EVENT: {
+                    ath_await_scan_complete = 0;
+                    wmi_scan_complete_event_t* info = (wmi_scan_complete_event_t*)params;
+
+                    if(len != 4)
+                        panic("sdio_poll_mbox(): WMI_SCAN_COMPLETE_EVENT: Unknown len (%x)\n", len);
+
+                    if(info->status != 0 && info->status != 0x10)
+                        panic("sdio_poll_mbox(): WMI_SCAN_COMPLETE_EVENT: Unknown scan status (%x)\n", info->status);
+                    break;
+                }
+                case WMI_EXTENSION_EVENT: {
+                    uint8_t* wmix_event_ptr = (uint8_t*)params;
+                    uint32_t wmix_event = wmix_event_ptr[0] | (wmix_event_ptr[1] << 8) | (wmix_event_ptr[2] << 16) | (wmix_event_ptr[3] << 24);
+                    switch(wmix_event) {
+                        case WMIX_HB_CHALLENGE_RESP_EVENT:
+                        case WMIX_DBGLOG_EVENT:
+                            break;
+                        default:
+                            print("Unknown WMIX Event 0x%x\n", wmix_event);
+                    }
+                    break;
+                }
                 default: {
-                    leaveCriticalSection(old_ime);
-                    panic("Unknown WMI Event 0x%x\n", event);
+                    //leaveCriticalSection(old_ime);
+                    print("Unknown WMI Event 0x%x\n", event);
                 }
             }
         } else if(header->type == MBOX_RECV_TYPE_DATA_PACKET || header->type == 5) { // Occurs on 02acc2?
@@ -301,6 +363,76 @@ void sdio_poll_mbox(uint8_t mbox) {
     leaveCriticalSection(old_ime);
 }
 
+void sdio_wmi_start_scan_cmd(uint8_t mbox, uint8_t type) {
+    wmi_start_scan_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_start_scan_cmd_t) - 6;
+    cmd.header.cmd = WMI_START_SCAN_CMD;
+
+    cmd.force_fg_scan = 0;
+    cmd.is_legacy = 0;
+    cmd.home_dwell_time = 0x14;
+    cmd.force_scan_time = 0;
+    cmd.scan_type = type;
+    cmd.n_channels = 0;
+    cmd.channels[0] = 0;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_scan_params_cmd(uint8_t mbox, wmi_set_scan_params_cmd_t* cmd) {
+    cmd->header.type = MBOX_SEND_TYPE_WMI;
+    cmd->header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd->header.len = sizeof(wmi_set_scan_params_cmd_t) - 6;
+    cmd->header.cmd = WMI_SET_SCAN_PARAMS_CMD;
+
+    sdio_send_wmi_cmd(mbox, &cmd->header);
+}
+
+void sdio_wmi_set_bss_filter_cmd(uint8_t mbox, uint8_t bss_filter, uint32_t ie_mask) {
+    wmi_set_bss_filter_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_bss_filter_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_BSS_FILTER_CMD;
+
+    cmd.bss_filter = bss_filter;
+    cmd.ie_mask = ie_mask;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_probed_ssid_cmd(uint8_t mbox, uint8_t flag, char* ssid) {
+    if(strlen(ssid) > 32)
+        panic("sdio_wmi_set_probed_ssid_cmd(): Invalid ssid length\n");
+    wmi_set_probed_ssid_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_probed_ssid_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_PROBED_SSID_CMD;
+
+    cmd.flag = flag;
+    strcpy(cmd.ssid, ssid);
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_channel_params_cmd(uint8_t mbox, uint8_t scan_param, uint8_t phy_mode, uint8_t n_channels, uint16_t* channels) {
+    wmi_set_channel_params_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_channel_params_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_CHANNEL_PARAMS_CMD;
+
+    cmd.scan_param = scan_param;
+    cmd.phy_mode = phy_mode;
+    cmd.num_channels = n_channels;
+    for(size_t i = 0; i < n_channels; i++)
+        cmd.channels[i] = channels[i];
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
 
 void sdio_wmi_get_channel_list_cmd(uint8_t mbox) {
     wmi_mbox_send_header_t cmd = {0};
@@ -334,4 +466,113 @@ void sdio_wmi_start_whatever_timer_cmd(uint8_t mbox, uint32_t time) {
     cmd.time = time;
 
     sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+uint32_t boot_channel_index = 0;
+uint32_t boot_channel_wait = 0;
+uint16_t requested_channel = 0;
+
+uint8_t boot_channel_list[] = {
+    1, 6, 11,
+    1, 6, 11,
+    1, 6, 11,
+    2, 3, 4, 5,
+    1, 6, 11,
+    7, 8, 9, 10,
+    12, 13, 14,
+    0
+};
+
+void get_next_scan_channel() {
+    uint32_t index = boot_channel_index;
+    while(true) {
+        uint8_t item = boot_channel_list[index];
+        if(item == 0) {
+            boot_channel_wait += boot_channel_wait;
+
+            if(boot_channel_wait > 7)
+                boot_channel_wait = 7;
+
+            extern sgWifiAp_t access_points[2];
+
+            for(size_t i = 0; i < 2; i++) {
+                if(!(access_points[i].flags & sgWifiAp_FLAGS_ACTIVE))
+                    continue;
+
+                access_points[i].timecrt++;
+                if(access_points[i].timecrt <= sgWifiAp_TIMEOUT)
+                    continue;
+
+                access_points[i].rssi = 0;
+                memset(access_points[i].rssi_past, 0 , 8 * sizeof(uint8_t));
+            }
+
+            index = 0;
+            continue;
+        }
+
+        boot_channel_index = index + 1;
+        requested_channel = item;
+        break;
+    }
+}
+
+uint32_t channel_to_mhz(uint32_t channel) {
+    channel -= 1;
+    if(channel > 13)
+        channel = 0;
+
+    if(channel == 13)
+        return 0x9B4;
+    else
+        return 0x96C + channel * 5;
+}
+
+
+void sdio_wmi_scan_channel(void) {
+    if(ath_await_scan_complete != 0)
+        return; // Already scanning
+
+    sdio_wmi_set_bss_filter_cmd(0, BSS_FILTER_NONE, 0); // Filter Off
+    print("set_bss_filter()\n");
+
+    sdio_wmi_set_probed_ssid_cmd(0, SSID_PROBE_FLAG_DISABLE, "");
+    print("set_probed_ssid()\n");
+
+    extern uint32_t regulatory_channels;
+    while((regulatory_channels & (1 << requested_channel)) == 0)
+        get_next_scan_channel(); // Updates requested_channel
+
+    extern uint16_t current_channel;
+    current_channel = requested_channel;
+        
+    uint16_t channels[1] = {0};
+    channels[0] = channel_to_mhz(current_channel);
+
+    sdio_wmi_set_channel_params_cmd(0, 0, PHY_MODE_11G, 1, channels); print("set_channel_params()\n");
+
+    uint32_t time = boot_channel_wait << 6;
+
+    wmi_set_scan_params_cmd_t cmd = {0};
+    cmd.fg_start_period = 0xFFFF;
+    cmd.fg_end_period = 0xFFFF;
+    cmd.bg_period = 0xFFFF;
+    cmd.maxact_chdwell_time = time;
+    cmd.pas_chdwell_time = time;
+    cmd.short_scan_ratio = 0;
+    cmd.scan_control_flags = 1;
+    cmd.minact_chdwell_time = time;
+    cmd.maxact_scan_per_ssid = 0x0;
+    cmd.max_dfsch_act_time = 0x0;
+
+    sdio_wmi_set_scan_params_cmd(0, &cmd); print("set_scan_params()\n");
+    sdio_wmi_set_bss_filter_cmd(0, BSS_FILTER_ALL, 0); print("set_bss_filter()\n");
+
+    ath_await_scan_complete = 1;
+
+    sdio_wmi_start_scan_cmd(0, SCAN_TYPE_LONG); print("start_scan()\n");
+
+    do {
+        sdio_poll_mbox(0);
+    } while(ath_await_scan_complete != 0);
 }

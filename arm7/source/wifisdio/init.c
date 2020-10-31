@@ -2,14 +2,21 @@
 #include "sdio.h"
 #include "bmi.h"
 #include "wmi.h"
+#include "wifi.h"
+
+#include "ndma.h"
 
 #include <string.h>
 #include <stdio.h>
 
 // Globals
-uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels;
-uint8_t twlcfg_etc_buf[0x214] = {0};
+uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels = 0;
+//uint8_t twlcfg_etc_buf[0x214] = {0};
 uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
+
+
+uint16_t current_channel = 0;
+sgWifiAp_t access_points[2];
 
 void sdio_controller_init(void) {
     SDIO_SOFT_RESET &= ~0b11; // Software reset, bit 1 shouldn't have any effect but FW does it as well 
@@ -205,8 +212,8 @@ void sdio_whatever_handshake(void) {
 }
 
 void sdio_atheros_init(void) {
-    memcpy(twlcfg_etc_buf, (void*)0x2000400, 0x214); // Backup TWLCFGn.DAT area
-    readFirmware(0x1FD, twlcfg_etc_buf + 0x1E0, 1);
+    //memcpy(twlcfg_etc_buf, (void*)0x2000400, 0x214); // Backup TWLCFGn.DAT area
+    //readFirmware(0x1FD, twlcfg_etc_buf + 0x1E0, 1);
 
     sdio_controller_init(); print("sdio_controller_init()\n");
     int need_upload = sdio_init_opcond_if_needed(); print("sdio_init_opcond_if_needed()\n");
@@ -238,22 +245,29 @@ void sdio_prepare_scanning(void) {
     sdio_poll_mbox(0); print("sdio_poll_mbox()\n");
 }
 
-volatile bool is_running = false;
+void Wifi_Init_Core(void) {
+    // TODO: Load actual AP data and shite
+    extern uint32_t boot_channel_wait;
 
-void sdio_irq_handler(void) {
-    if(!is_running)
-        return;
-    
-    sdio_poll_mbox(0);
+    boot_channel_wait = 2;
+
+    extern uint16_t requested_channel;
+    extern uint8_t boot_channel_list[];
+    requested_channel = boot_channel_list[0];
+    current_channel  = requested_channel;
 }
 
 void sdio_init(void) {
-    powerOn(1 << 1); // Power up DSWIFI, is this really needed?
-    irqSetAUX(IRQ_SDIOWIFI, sdio_irq_handler);
-    irqEnableAUX(IRQ_SDIOWIFI);
+    //powerOn(1 << 1); // Power up DSWIFI, is this really needed?
+    
+    NDMAGCNT = 0; // Use linear priority mode
+
+    Wifi_Init_Core();
 
     sdio_atheros_init();
     sdio_prepare_scanning();
 
-    is_running = true;
+    sdio_wmi_scan_channel();
+    sdio_wmi_scan_channel();
+    sdio_wmi_scan_channel();
 }

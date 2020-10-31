@@ -68,11 +68,6 @@ uint32_t sdio_bmi_get_version(void) {
     if(version == 0xffffffff) {
         uint32_t len = sdio_read_mbox_word(0) - 4; // Total length - 4
 
-        if(len >= 0x80) {
-            print("TODO: Nonlocal xfer_buf\n");
-            return 0;
-        }
-
         sdio_cmd53_read_mbox_to_xfer_buf(0, len);
 
         version = sdio_xfer_buf[0]; // 1st = ROM version
