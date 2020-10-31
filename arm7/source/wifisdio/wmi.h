@@ -53,6 +53,7 @@ typedef struct {
 #define WMI_GET_CHANNEL_LIST_CMD 0xE
 #define WMI_SET_CHANNEL_PARAMS_CMD 0x11
 #define WMI_SET_POWER_MODE_CMD 0x12
+#define WMI_ADD_CIPHER_KEY_CMD 0x16
 #define WMI_TARGET_ERROR_REPORT_BITMASK_CMD 0x22
 #define WMI_EXTENSION_CMD 0x2E // Prefix for WMIX cmds
 #define WMI_SET_KEEPALIVE_CMD 0x3D
@@ -66,6 +67,7 @@ typedef struct {
 #define WMI_GET_CHANNEL_LIST_EVENT 0xE
 #define WMI_READY_EVENT 0x1001
 #define WMI_CONNECT_EVENT 0x1002
+#define WMI_DISCONNECT_EVENT 0x1003
 #define WMI_BSSINFO_EVENT 0x1004
 #define WMI_REGDOMAIN_EVENT 0x1006
 #define WMI_SCAN_COMPLETE_EVENT 0x100A
@@ -102,6 +104,34 @@ typedef struct {
 #define PHY_MODE_11AG 0x3
 #define PHY_MODE_11B 0x4
 #define PHY_MODE_11G_ONLY 0x5
+
+#define NETWORK_INFRA 0x1
+#define NETWORK_ADHOC 0x2
+#define NETWORK_ADHOC_CREATOR 0x4
+#define NETWORK_AP 0x10
+
+#define AUTH_OPEN 0x1 // Open/WPA/WPA2
+#define AUTH_SHARED 0x2 // WEP
+#define AUTH_LEAP 0x4
+
+#define WMI_NONE_AUTH 0x1 // Open/WEP
+#define WMI_WPA_PSK_AUTH 0x3
+#define WMI_WPA2_PSK_AUTH 0x5
+
+#define CRYPT_NONE 0x1
+#define CRYPT_WEP 0x2
+#define CRYPT_TKIP 0x3
+#define CRYPT_AES 0x4
+
+#define KEY_USAGE_PAIRWISE 0x0
+#define KEY_USAGE_GROUP 0x1
+#define KEY_USAGE_TX 0x2
+
+#define KEY_OP_INIT_TSC 0x1
+#define KEY_OP_INIT_RSC 0x2
+#define KEY_OP_INIT_WAPIPN 0x10
+
+
 
 typedef struct {
     wmi_mbox_cmd_send_header_t header;
@@ -219,6 +249,17 @@ typedef struct {
 
 typedef struct {
     wmi_mbox_cmd_send_header_t header;
+    uint8_t key_index;
+    uint8_t key_type;
+    uint8_t key_usage;
+    uint8_t key_length;
+    uint8_t key_rsc[8];
+    uint8_t key[32];
+    uint8_t key_op_control;
+} __attribute__((packed)) wmi_add_cipher_key_cmd_t;
+
+typedef struct {
+    wmi_mbox_cmd_send_header_t header;
     uint32_t bitmask;
 } __attribute__((packed)) wmi_error_report_cmd_t;
 
@@ -290,6 +331,7 @@ void sdio_wmi_set_probed_ssid_cmd(uint8_t mbox, uint8_t flag, char* ssid);
 void sdio_wmi_set_disconnect_timeout_cmd(uint8_t mbox, uint8_t timeout);
 void sdio_wmi_set_channel_params_cmd(uint8_t mbox, uint8_t scan_param, uint8_t phy_mode, uint8_t n_channels, uint16_t* channels);
 void sdio_wmi_set_power_mode_cmd(uint8_t mbox, uint8_t power_mode);
+void sdio_wmi_add_cipher_key_cmd(uint8_t mbox, uint8_t index, uint8_t type, uint8_t usage, uint8_t op, uint8_t key_length, uint8_t* key);
 void sdio_wmi_get_channel_list_cmd(uint8_t mbox);
 void sdio_wmi_error_report_cmd(uint8_t mbox, uint32_t bitmask);
 void sdio_wmi_set_keepalive_cmd(uint8_t mbox, uint8_t interval);

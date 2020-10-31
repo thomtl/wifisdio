@@ -269,6 +269,14 @@ void sdio_poll_mbox(uint8_t mbox) {
                     ath_await_connect_complete = 0;
                     break;
                 }
+                case WMI_DISCONNECT_EVENT: {
+                    uint16_t a = params[0];
+                    uint8_t reason = ((uint8_t*)params)[8];
+
+                    leaveCriticalSection(old_ime);
+                    panic("WMI DISCONNECT reason %x %x\n", a, reason);
+                    break;
+                }
                 case WMI_BSSINFO_EVENT: {
                     wmi_bssinfo_event_t* info = (wmi_bssinfo_event_t*)params;
                     WifiBeacon_t beacon = {0};
@@ -528,6 +536,27 @@ void sdio_wmi_set_power_mode_cmd(uint8_t mbox, uint8_t power_mode) {
     cmd.header.cmd = WMI_SET_POWER_MODE_CMD;
 
     cmd.power_mode = power_mode;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_add_cipher_key_cmd(uint8_t mbox, uint8_t index, uint8_t type, uint8_t usage, uint8_t op, uint8_t key_length, uint8_t* key) {
+    wmi_add_cipher_key_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_add_cipher_key_cmd_t) - 6;
+    cmd.header.cmd = WMI_ADD_CIPHER_KEY_CMD;
+
+    if(key_length > 32)
+        panic("sdio_wmi_add_cipher_key_cmd(): Invalid cipher key length (%x)\n", key_length);
+
+    cmd.key_index = index;
+    cmd.key_type = type;
+    cmd.key_usage = usage;
+    cmd.key_length = key_length;
+    memcpy(cmd.key, key, cmd.key_length);
+
+    cmd.key_op_control = op;
 
     sdio_send_wmi_cmd(mbox, &cmd.header);
 }
@@ -800,13 +829,48 @@ void sdio_wmi_connect(void) {
 
     ath_await_connect_complete = 1;
 
+    uint8_t dot11_auth_mode = AUTH_OPEN;
+    uint8_t auth_mode = WMI_NONE_AUTH;
+    uint8_t crypt_type = CRYPT_NONE;
+
+    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WPA)
+        panic("sdio_wmi_connect(): WPA is as of yet unsupported\n");
+
+
+    if(access_points[ap_index].flags & sgWifiAp_FLAGS_WEP) {
+        print("sdio_wmi_connect(): WEP Support is untested!!\n");
+        for(size_t i = 0; i < 4; i++) {
+            uint8_t usage = (i == 0) ? (KEY_USAGE_GROUP | KEY_USAGE_TX) : (KEY_USAGE_GROUP);
+            uint8_t wepmode = access_points[ap_index].wepmode;
+
+            uint8_t keylen = 0;
+            if(wepmode == 1 || wepmode == 5)
+                keylen = 5;
+            else if(wepmode == 2 || wepmode == 6)
+                keylen = 13;
+            else if(wepmode == 3 || wepmode == 7)
+                keylen = 16;
+            else
+                panic("sdio_wmi_connect(): Unknown WEPmode (%x)\n", wepmode);
+
+            uint8_t dummy_key[32] = {0};
+            uint8_t* key = (i == 0) ? access_points[ap_index].wepkey : dummy_key;
+            
+            sdio_wmi_add_cipher_key_cmd(0, i, CRYPT_WEP, usage, KEY_OP_INIT_TSC | KEY_OP_INIT_RSC, keylen, key);
+        }
+
+        dot11_auth_mode = AUTH_SHARED;
+        auth_mode = WMI_NONE_AUTH;
+        crypt_type = CRYPT_WEP;
+    }
+
     wmi_connect_cmd_t connect = {0};
-    connect.network_type = 1;
-    connect.dot11_auth_mode = 1;
-    connect.auth_mode = 1;
-    connect.pairwise_crypto_type = 1;
+    connect.network_type = NETWORK_INFRA;
+    connect.dot11_auth_mode = dot11_auth_mode;
+    connect.auth_mode = auth_mode;
+    connect.pairwise_crypto_type = crypt_type;
     connect.pairwise_cypto_len = 0;
-    connect.group_crypto_type = 1;
+    connect.group_crypto_type = crypt_type;
     connect.group_crypto_len = 0;
     connect.ssid_length = access_points[ap_index].ssid_len;
     memcpy(connect.ssid, access_points[ap_index].ssid, access_points[ap_index].ssid_len);

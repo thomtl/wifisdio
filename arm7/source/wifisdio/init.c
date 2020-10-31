@@ -304,6 +304,8 @@ void Wifi_Init_Core(void) {
         access_points[i].ssid_len = strlen(access_points[i].ssid);
 
         access_points[i].wepmode = data[0xE6] & 0xF;
+        memcpy(access_points[i].wepkey, data + 0x80, 0x10);
+
         access_points[i].ip = ((uint32_t*)data)[0xC0 / 4];
         access_points[i].gateway = ((uint32_t*)data)[0xC4 / 4];
         access_points[i].primary_dns = ((uint32_t*)data)[0xC8 / 4];
@@ -312,7 +314,26 @@ void Wifi_Init_Core(void) {
         uint32_t subnet_mask = 0xFFFFFFFF << (32 - data[0xD0]);
         access_points[i].subnet = htonl(subnet_mask);
 
-        // TODO(thom_tl): WPA/WPA2
+        // TODO(thom_tl): WEP/WPA/WPA2
+        if(i < 3) {
+            access_points[i].flags |= (data[0xE6]) ? (sgWifiAp_FLAGS_WEP) : (0);
+        } else {
+            uint8_t type = 0;
+            readFirmware(wfc_offset + 0x181, &type, 1);
+
+            if(type == 0)
+                access_points[i].flags |= (data[0xE6]) ? (sgWifiAp_FLAGS_WEP) : (0);
+            else
+                access_points[i].flags |= sgWifiAp_FLAGS_WPA;
+        }
+        
+        /*print("%.*s: ", access_points[i].ssid_len, access_points[i].ssid);
+        if(access_points[i].flags & sgWifiAp_FLAGS_WEP)
+            print("WEP\n");
+        else if(access_points[i].flags & sgWifiAp_FLAGS_WPA)
+            print("WPA\n");
+        else
+            print("None\n");*/
 
         access_points[i].enable = 0x80;
     }
