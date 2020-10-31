@@ -8,9 +8,22 @@ typedef struct {
     uint16_t len;
     uint16_t reserved;
     uint16_t cmd;
-} __attribute__((packed)) wmi_mbox_send_header_t;
+} __attribute__((packed)) wmi_mbox_cmd_send_header_t;
+
+typedef struct {
+    uint8_t type;
+    uint8_t flags;
+    uint16_t len;
+    uint16_t reserved;
+    uint16_t unknown;
+    uint8_t dest_mac[6];
+    uint8_t source_mac[6];
+    uint16_t network_len;
+} __attribute__((packed)) wmi_mbox_data_send_header_t;
 
 #define MBOX_SEND_TYPE_WMI 1
+#define MBOX_SEND_TYPE_DATA 2
+
 #define MBOX_SEND_FLAGS_REQUEST_ACK 1
 
 typedef struct {
@@ -91,7 +104,7 @@ typedef struct {
 #define PHY_MODE_11G_ONLY 0x5
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t network_type;
     uint8_t dot11_auth_mode;
     uint8_t auth_mode;
@@ -107,12 +120,12 @@ typedef struct {
 } __attribute__((packed)) wmi_connect_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t data_sync_map;
 } __attribute__((packed)) wmi_synchronize_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint32_t min_service_int;
     uint32_t max_service_int;
     uint32_t inactivity_int;
@@ -138,7 +151,7 @@ typedef struct {
 } __attribute__((packed)) wmi_create_pstream_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint32_t force_fg_scan;
     uint32_t is_legacy;
     uint32_t home_dwell_time;
@@ -149,7 +162,7 @@ typedef struct {
 } __attribute__((packed)) wmi_start_scan_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint16_t fg_start_period;
     uint16_t fg_end_period;
     uint16_t bg_period;
@@ -163,14 +176,14 @@ typedef struct {
 } __attribute__((packed)) wmi_set_scan_params_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint32_t cmd;
     uint32_t cookie;
     uint32_t source; 
 } __attribute__((packed)) wmix_hb_challenge_resp_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t bss_filter;
     uint8_t reserved1;
     uint16_t reserved2;
@@ -178,7 +191,7 @@ typedef struct {
 } __attribute__((packed)) wmi_set_bss_filter_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t index;
     uint8_t flag;
     uint8_t ssid_length;
@@ -186,12 +199,12 @@ typedef struct {
 } __attribute__((packed)) wmi_set_probed_ssid_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t disconnect_timeout;
 } __attribute__((packed)) wmi_set_disconnect_timeout_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t reserved;
     uint8_t scan_param;
     uint8_t phy_mode;
@@ -200,39 +213,39 @@ typedef struct {
 } __attribute__((packed)) wmi_set_channel_params_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t power_mode;
 } __attribute__((packed)) wmi_set_power_mode_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint32_t bitmask;
 } __attribute__((packed)) wmi_error_report_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t keepalive_interval;
 } __attribute__((packed)) wmi_set_keepalive_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t undocumented;
 } __attribute__((packed)) wmi_set_wsc_status_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint32_t time;
 } __attribute__((packed)) wmi_start_whatever_timer_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t enable_mask;
     uint8_t frame_type;
     uint32_t frame_rate_mask;
 } __attribute__((packed)) wmi_set_framerates_cmd_t;
 
 typedef struct {
-    wmi_mbox_send_header_t header;
+    wmi_mbox_cmd_send_header_t header;
     uint8_t rate_index;
     uint8_t management_rate_index;
     uint8_t control_rate_index;
@@ -259,8 +272,8 @@ typedef struct {
 } __attribute__((packed)) wmi_scan_complete_event_t;
 
 
-void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_send_header_t* xfer_buf);
-void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_send_header_t* xfer_buf);
+void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_cmd_send_header_t* xfer_buf);
+void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_cmd_send_header_t* xfer_buf);
 
 void sdio_heartbeat(uint8_t mbox);
 void sdio_tx_callback(void);
@@ -287,3 +300,5 @@ void sdio_wmi_set_bitrate_cmd(uint8_t mbox, uint8_t rate_index, uint8_t manageme
 
 void sdio_wmi_scan_channel(void);
 void sdio_wmi_connect(void);
+
+void sdio_send_wmi_data(wmi_mbox_data_send_header_t* packet);

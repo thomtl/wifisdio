@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "wmi.h"
 
 // Options
 
@@ -18,3 +19,5 @@ extern void panic(const char* s, ...);
 extern uint32_t sdio_xfer_buf[];
 
 void sdio_init(void);
+
+void sdio_tx_packet(uint8_t* destination_mac, wmi_mbox_data_send_header_t* packet, uint16_t len, uint16_t body_len);

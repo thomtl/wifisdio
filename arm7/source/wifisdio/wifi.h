@@ -58,3 +58,11 @@ typedef struct {
 static inline uint32_t htonl(uint32_t v) {
     return (v << 24) | (v >> 24) | (v & 0xFF0000 >> 8) | (v & 0xFF00 << 8);
 }
+
+static inline uint16_t htons(uint16_t v) {
+    uint32_t ret = v | (v << 16);
+    ret >>= 8;
+    ret &= ~0xFF0000;
+    
+    return ret;
+}

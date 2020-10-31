@@ -18,12 +18,12 @@ uint8_t ath_lookahead_flag = 0;
 uint32_t recent_heartbeat = 0;
 uint32_t** curr_wpa_tx_callback_list_ptr = NULL;
 
-void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_send_header_t* cmd) {
+void sdio_send_wmi_cmd_without_poll(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
     sdio_send_mbox_block(mbox, (uint8_t*)cmd);
     ath_cmd_ack_pending = (cmd->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? (1) : (0);
 }
 
-void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_send_header_t* cmd) {
+void sdio_send_wmi_cmd(uint8_t mbox, wmi_mbox_cmd_send_header_t* cmd) {
     do {
         sdio_poll_mbox(mbox);
     } while (ath_cmd_ack_pending != 0);
@@ -256,6 +256,10 @@ void sdio_poll_mbox(uint8_t mbox) {
                 }
                 case WMI_READY_EVENT: {
                     uint8_t* mac = (uint8_t*)params;
+
+                    extern uint8_t device_mac[6];
+                    memcpy(device_mac, mac, 6);
+
                     print("MAC %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
                     break;
@@ -529,10 +533,10 @@ void sdio_wmi_set_power_mode_cmd(uint8_t mbox, uint8_t power_mode) {
 }
 
 void sdio_wmi_get_channel_list_cmd(uint8_t mbox) {
-    wmi_mbox_send_header_t cmd = {0};
+    wmi_mbox_cmd_send_header_t cmd = {0};
     cmd.type = MBOX_SEND_TYPE_WMI;
     cmd.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
-    cmd.len = sizeof(wmi_mbox_send_header_t) - 6;
+    cmd.len = sizeof(wmi_mbox_cmd_send_header_t) - 6;
     cmd.cmd = WMI_GET_CHANNEL_LIST_CMD;
 
     sdio_send_wmi_cmd(mbox, &cmd);
@@ -818,4 +822,14 @@ void sdio_wmi_connect(void) {
     do {
         sdio_poll_mbox(0);
     } while(ath_await_connect_complete != 0);
+}
+
+void sdio_send_wmi_data(wmi_mbox_data_send_header_t* packet) {
+    ath_data_ack_pending = (packet->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? (1) : (0);
+
+    sdio_send_mbox_block(0, (uint8_t*)packet);
+
+    do {
+        sdio_poll_mbox(0);
+    } while(ath_data_ack_pending != 0);
 }

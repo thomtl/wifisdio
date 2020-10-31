@@ -4,6 +4,7 @@
 #include <stdarg.h>
 
 #include "wifisdio/wifisdio.h"
+#include "wifisdio/wmi.h"
 
 volatile bool exitflag = false;
 volatile uint32_t arm7_count_60hz = 0;
@@ -65,8 +66,29 @@ int main() {
 	init_arm7();
 
 	sdio_init();
+	print("SDIO: Init\n");
 
-	print("sdio initialized\n");
+	struct test_packet {
+		wmi_mbox_data_send_header_t header;
+		uint8_t llc_snap[6];
+		uint16_t protocol;
+		char data[25];
+	} __attribute__((packed));
+
+	struct test_packet packet = {0};
+	packet.llc_snap[0] = 0xAA;
+	packet.llc_snap[1] = 0xAA;
+	packet.llc_snap[2] = 0x3;
+
+	packet.protocol = 0;
+
+	strncpy(packet.data, "Hello DSiWifi World", 25);
+
+	uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+	sdio_tx_packet(broadcast_mac, &packet.header, sizeof(packet), 25);
+
+	print("SDIO: Sent test packet\n");
+
 
 	while (!exitflag) {
 		if ((REG_KEYINPUT & KEY_START) == 0)

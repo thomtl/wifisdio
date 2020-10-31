@@ -14,6 +14,8 @@ uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels = 0;
 //uint8_t twlcfg_etc_buf[0x214] = {0};
 TWL_BSS uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
 
+uint8_t device_mac[6];
+
 uint16_t current_channel = 0;
 WifiAp_t access_points[6];
 
@@ -340,4 +342,17 @@ void sdio_init(void) {
         sdio_wmi_scan_channel();
 
     sdio_wmi_connect();
+}
+
+void sdio_tx_packet(uint8_t* destination_mac, wmi_mbox_data_send_header_t* packet, uint16_t len, uint16_t body_len) {
+    packet->type = MBOX_SEND_TYPE_DATA;
+    packet->flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    packet->len = len - 6;
+
+    memcpy(packet->dest_mac, destination_mac, 6);
+    memcpy(packet->source_mac, device_mac, 6);
+
+    packet->network_len = htons(body_len);
+
+    sdio_send_wmi_data(packet);
 }
