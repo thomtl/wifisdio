@@ -9,3 +9,7 @@ dsregs.s
 wifisdio.s
 wificore.s
 poll.s
+channel.s
+scan.s
+tmp
+connect.s

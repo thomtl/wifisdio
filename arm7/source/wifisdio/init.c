@@ -12,11 +12,13 @@
 // Globals
 uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels = 0;
 //uint8_t twlcfg_etc_buf[0x214] = {0};
-uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
-
+TWL_BSS uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
 
 uint16_t current_channel = 0;
-sgWifiAp_t access_points[2];
+WifiAp_t access_points[6];
+
+bool ap_found = false;
+uint8_t ap_index = 0;
 
 void sdio_controller_init(void) {
     SDIO_SOFT_RESET &= ~0b11; // Software reset, bit 1 shouldn't have any effect but FW does it as well 
@@ -246,7 +248,74 @@ void sdio_prepare_scanning(void) {
 }
 
 void Wifi_Init_Core(void) {
-    // TODO: Load actual AP data and shite
+    uint8_t flashdata[0x200] = {0};
+    readFirmware(0, flashdata, 0x200);
+
+    uint16_t settings_offset = ((uint16_t*)flashdata)[0x20 / 2];
+    uint32_t wfc1_offset = settings_offset * 8 - 0x400;
+    uint8_t enabled_wfc_entries = 0;
+    readFirmware(wfc1_offset + 0xEF, &enabled_wfc_entries, 1);
+    enabled_wfc_entries &= 0x7;
+
+    uint8_t flash_type = 0;
+    readFirmware(0x1FE, &flash_type, 1);
+
+    if(flash_type == 0x20) {
+        uint32_t wfc4_offset = settings_offset * 8 - 0xA00;
+        uint8_t enabled_high_wfc_entries = 0;
+        readFirmware(wfc4_offset + 0xEF, &enabled_high_wfc_entries, 1);
+        enabled_wfc_entries |= ((enabled_high_wfc_entries & 0x7) << 3);
+    }
+
+    uint32_t offsets[6] = {0x400, 0x300, 0x200, 0xA00, 0x800, 0x600};
+    for(size_t i = 0; i < 6; i++) {
+        if((enabled_wfc_entries & (1 << i)) == 0)
+            continue;
+
+        uint32_t wfc_offset = settings_offset * 8 - offsets[i];
+
+        uint8_t data[0x100] = {0};
+        readFirmware(wfc_offset, data, 0x100);
+
+        if(swiCRC16(0x0, data, 0xFE + 2) != 0)
+            continue;
+
+        uint8_t type = data[0xE7];
+        if(type == 0xFF)
+            continue;
+
+        /*
+            0 => Normal
+            1 => AOSS
+            0x10 => WPAx
+            0x13 => WPAx + WPS
+        */
+        if(type != 0 && type != 1 && type != 0x10 && type != 0x13)
+            continue;
+
+        access_points[i].channel = 0;
+        memset(access_points[i].bssid, 0, 6);
+
+        memcpy(access_points[i].ssid, data + 0x40, 0x20);
+
+        access_points[i].ssid[0x20] = '\0';
+        access_points[i].ssid_len = strlen(access_points[i].ssid);
+
+        access_points[i].wepmode = data[0xE6] & 0xF;
+        access_points[i].ip = ((uint32_t*)data)[0xC0 / 4];
+        access_points[i].gateway = ((uint32_t*)data)[0xC4 / 4];
+        access_points[i].primary_dns = ((uint32_t*)data)[0xC8 / 4];
+        access_points[i].secondary_dns = ((uint32_t*)data)[0xCC / 4];
+
+        uint32_t subnet_mask = 0xFFFFFFFF << (32 - data[0xD0]);
+        access_points[i].subnet = htonl(subnet_mask);
+
+        // TODO(thom_tl): WPA/WPA2
+
+        access_points[i].enable = 0x80;
+    }
+
+
     extern uint32_t boot_channel_wait;
 
     boot_channel_wait = 2;
@@ -267,7 +336,8 @@ void sdio_init(void) {
     sdio_atheros_init();
     sdio_prepare_scanning();
 
-    sdio_wmi_scan_channel();
-    sdio_wmi_scan_channel();
-    sdio_wmi_scan_channel();
+    while(!ap_found)
+        sdio_wmi_scan_channel();
+
+    sdio_wmi_connect();
 }

@@ -29,20 +29,30 @@ typedef struct {
 
 #define PROTOCOL_ETHER_EAPOL 0x8e88 // TODO: Move this somewhere else
 
+#define WMI_CONNECT_CMD 0x1
+#define WMI_SYNCHRONIZE_CMD 0x4
+#define WMI_CREATE_PSTREAM_CMD 0x5
 #define WMI_START_SCAN_CMD 0x7
 #define WMI_SET_SCAN_PARAMS_CMD 0x8
 #define WMI_SET_BSS_FILTER_CMD 0x9
 #define WMI_SET_PROBED_SSID_CMD 0xA
+#define WMI_SET_DISCONNECT_TIMEOUT_CMD 0xD
 #define WMI_GET_CHANNEL_LIST_CMD 0xE
 #define WMI_SET_CHANNEL_PARAMS_CMD 0x11
+#define WMI_SET_POWER_MODE_CMD 0x12
 #define WMI_TARGET_ERROR_REPORT_BITMASK_CMD 0x22
 #define WMI_EXTENSION_CMD 0x2E // Prefix for WMIX cmds
+#define WMI_SET_KEEPALIVE_CMD 0x3D
+#define WMI_SET_WSC_STATUS_CMD 0x41
 #define WMI_START_WHATEVER_TIMER_CMD 0x47 // Seems to be Nintendo specific
+#define WMI_SET_FRAMERATES_CMD 0x48
+#define WMI_SET_BITRATE_CMD 0xF000
 
 #define WMIX_HB_CHALLENGE_RESP_CMD 0x00002008
 
 #define WMI_GET_CHANNEL_LIST_EVENT 0xE
 #define WMI_READY_EVENT 0x1001
+#define WMI_CONNECT_EVENT 0x1002
 #define WMI_BSSINFO_EVENT 0x1004
 #define WMI_REGDOMAIN_EVENT 0x1006
 #define WMI_SCAN_COMPLETE_EVENT 0x100A
@@ -79,6 +89,53 @@ typedef struct {
 #define PHY_MODE_11AG 0x3
 #define PHY_MODE_11B 0x4
 #define PHY_MODE_11G_ONLY 0x5
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t network_type;
+    uint8_t dot11_auth_mode;
+    uint8_t auth_mode;
+    uint8_t pairwise_crypto_type;
+    uint8_t pairwise_cypto_len;
+    uint8_t group_crypto_type;
+    uint8_t group_crypto_len;
+    uint8_t ssid_length;
+    uint8_t ssid[32];
+    uint16_t channel;
+    uint8_t bssid[6];
+    uint32_t control_flags;
+} __attribute__((packed)) wmi_connect_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t data_sync_map;
+} __attribute__((packed)) wmi_synchronize_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint32_t min_service_int;
+    uint32_t max_service_int;
+    uint32_t inactivity_int;
+    uint32_t suspension_time;
+    uint32_t service_start_time;
+    uint32_t min_data_rate;
+    uint32_t mean_data_rate;
+    uint32_t peak_data_rate;
+    uint32_t max_burst_size;
+    uint32_t delay_bound;
+    uint32_t min_phy_rate;
+    uint32_t sba;
+    uint32_t medium_time;
+    uint16_t nominal_msdu;
+    uint16_t max_msdu;
+    uint8_t traffic_class;
+    uint8_t traffic_direction;
+    uint8_t rx_queue_num;
+    uint8_t traffic_type;
+    uint8_t voice_ps_capability;
+    uint8_t tsid;
+    uint8_t user_priority;
+} __attribute__((packed)) wmi_create_pstream_cmd_t;
 
 typedef struct {
     wmi_mbox_send_header_t header;
@@ -130,6 +187,11 @@ typedef struct {
 
 typedef struct {
     wmi_mbox_send_header_t header;
+    uint8_t disconnect_timeout;
+} __attribute__((packed)) wmi_set_disconnect_timeout_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
     uint8_t reserved;
     uint8_t scan_param;
     uint8_t phy_mode;
@@ -139,13 +201,42 @@ typedef struct {
 
 typedef struct {
     wmi_mbox_send_header_t header;
+    uint8_t power_mode;
+} __attribute__((packed)) wmi_set_power_mode_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
     uint32_t bitmask;
 } __attribute__((packed)) wmi_error_report_cmd_t;
 
 typedef struct {
     wmi_mbox_send_header_t header;
+    uint8_t keepalive_interval;
+} __attribute__((packed)) wmi_set_keepalive_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t undocumented;
+} __attribute__((packed)) wmi_set_wsc_status_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
     uint32_t time;
 } __attribute__((packed)) wmi_start_whatever_timer_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t enable_mask;
+    uint8_t frame_type;
+    uint32_t frame_rate_mask;
+} __attribute__((packed)) wmi_set_framerates_cmd_t;
+
+typedef struct {
+    wmi_mbox_send_header_t header;
+    uint8_t rate_index;
+    uint8_t management_rate_index;
+    uint8_t control_rate_index;
+} __attribute__((packed)) wmi_set_bitrate_cmd_t;
 
 typedef struct {
     uint8_t reserved;
@@ -176,13 +267,23 @@ void sdio_tx_callback(void);
 
 void sdio_poll_mbox(uint8_t mbox);
 
+void sdio_wmi_connect_cmd(uint8_t mbox, wmi_connect_cmd_t* cmd);
+void sdio_wmi_synchronize_cmd(uint8_t mbox, uint16_t unknown, uint8_t data_sync_map);
+void sdio_wmi_create_pstream_cmd(uint8_t mbox, wmi_create_pstream_cmd_t* cmd);
 void sdio_wmi_start_scan_cmd(uint8_t mbox, uint8_t type);
 void sdio_wmi_set_scan_params_cmd(uint8_t mbox, wmi_set_scan_params_cmd_t* cmd);
 void sdio_wmi_set_bss_filter_cmd(uint8_t mbox, uint8_t bss_filter, uint32_t ie_mask);
 void sdio_wmi_set_probed_ssid_cmd(uint8_t mbox, uint8_t flag, char* ssid);
+void sdio_wmi_set_disconnect_timeout_cmd(uint8_t mbox, uint8_t timeout);
 void sdio_wmi_set_channel_params_cmd(uint8_t mbox, uint8_t scan_param, uint8_t phy_mode, uint8_t n_channels, uint16_t* channels);
+void sdio_wmi_set_power_mode_cmd(uint8_t mbox, uint8_t power_mode);
 void sdio_wmi_get_channel_list_cmd(uint8_t mbox);
 void sdio_wmi_error_report_cmd(uint8_t mbox, uint32_t bitmask);
+void sdio_wmi_set_keepalive_cmd(uint8_t mbox, uint8_t interval);
+void sdio_wmi_set_wsc_status_cmd(uint8_t mbox, uint8_t undocumented);
 void sdio_wmi_start_whatever_timer_cmd(uint8_t mbox, uint32_t time);
+void sdio_wmi_set_framerates_cmd(uint8_t mbox, uint8_t enable_mask, uint8_t frame_type, uint32_t frame_type_mask);
+void sdio_wmi_set_bitrate_cmd(uint8_t mbox, uint8_t rate_index, uint8_t management_rate, uint8_t control_rate);
 
 void sdio_wmi_scan_channel(void);
+void sdio_wmi_connect(void);

@@ -10,6 +10,7 @@
 uint8_t ath_cmd_ack_pending = 0;
 uint8_t ath_data_ack_pending = 0;
 uint8_t ath_await_scan_complete = 0;
+uint8_t ath_await_connect_complete = 0;
 
 uint32_t ath_lookahead_value = 0;
 uint8_t ath_lookahead_flag = 0;
@@ -259,52 +260,90 @@ void sdio_poll_mbox(uint8_t mbox) {
 
                     break;
                 }
+                case WMI_CONNECT_EVENT: {
+                    print("WMI CONNECT\n");
+                    ath_await_connect_complete = 0;
+                    break;
+                }
                 case WMI_BSSINFO_EVENT: {
                     wmi_bssinfo_event_t* info = (wmi_bssinfo_event_t*)params;
-                    sgBeacon_t beacon = {0};
+                    WifiBeacon_t beacon = {0};
 
                     beacon.strength = info->snr;
                     memcpy(beacon.sa, info->bssid, 6);
                     memcpy(beacon.bssid, info->bssid, 6);
 
-                    len -= sizeof(sgBeacon_t);
+                    len -= sizeof(WifiBeacon_t);
 
                     uint32_t flags = sgWifiAp_FLAGS_ACTIVE | sgWifiAp_FLAGS_COMPATIBLE;
                     if(memcmp(beacon.sa, beacon.bssid, 6) != 0)
                         flags |= sgWifiAp_FLAGS_ADHOC;
+
+                    size_t j = 0;
                     if(len < (8 + 2))
                         break;
 
-                    len -= 8; // Skip Timestamp
-                    len -= 2; // Skip BeaconInterval
+                    j += 8; // Skip Timestap
+                    j += 2; // Skip BeaconInterval
 
                     if(len < 2)
                         break;
                     
-                    uint16_t capability = info->body[8 + 2] | (info->body[8 + 2 + 1]);
-                    len -= 2; // Skip Capability
+                    uint16_t capability = info->body[j] | (info->body[j + 1]);
+                    j += 2; // Skip Capability
 
                     if(capability & 0x10)
                         flags |= sgWifiAp_FLAGS_WEP;
 
-                    /*uint8_t ssid_len = 0;
+                    uint8_t ssid_len = 0;
                     char* ssid = NULL;
 
-                    uint32_t rateset;
+                    uint8_t* rate_set;
                     extern uint16_t current_channel;
-                    uint16_t channel = current_channel;*/
+                    uint16_t channel = current_channel;
 
-                    // TODO(thom_tl): finish scan_beacon_lop
+                    extern WifiAp_t access_points[6];
 
-                    for(size_t j = (8 + 2 + 2); j < len;) {
+                    while(j < len) {
                         uint8_t item_type = info->body[j++];
                         uint8_t item_len = info->body[j++];
 
-                        if(item_type == 0) {
-                            print("SSID: %.*s\n", item_len, &info->body[j]);
+                        switch(item_type) {
+                            case WIFI_MANAGEMENT_ELEMENT_ID_SSID: {
+                                //print("SSID: %.*s\n", item_len, &info->body[j]);
+                                ssid_len = item_len;
+                                ssid = &info->body[j];
+                                break;
+                            }
+                            case WIFI_MANAGEMENT_ELEMENT_ID_RATE_SET: {
+                                rate_set = &info->body[j - 1];
+                                break;
+                            }
+                            case WIFI_MANAGEMENT_ELEMENT_ID_DS_SET: {
+                                if(item_len > 1)
+                                    channel = info->body[j];
+                                break;
+                            }
                         }
 
                         j += item_len;
+                    }
+
+                    for(size_t i = 0; i < 6; i++) {
+                        if((access_points[i].enable & 0x80) == 0)
+                            continue;
+
+                        if(strncmp(access_points[i].ssid, ssid, ssid_len) == 0) {
+                            memcpy(access_points[i].bssid, beacon.bssid, 6);
+                            access_points[i].channel = current_channel;
+
+                            extern bool ap_found;
+                            extern uint8_t ap_index;
+
+                            ap_found = true;
+                            ap_index = i;
+                            break;
+                        }
                     }
 
                     break;
@@ -363,6 +402,37 @@ void sdio_poll_mbox(uint8_t mbox) {
     leaveCriticalSection(old_ime);
 }
 
+void sdio_wmi_connect_cmd(uint8_t mbox, wmi_connect_cmd_t* cmd) {
+    cmd->header.type = MBOX_SEND_TYPE_WMI;
+    cmd->header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd->header.len = sizeof(wmi_connect_cmd_t) - 6;
+    cmd->header.cmd = WMI_CONNECT_CMD;
+
+    sdio_send_wmi_cmd(mbox, &cmd->header);
+}
+
+void sdio_wmi_synchronize_cmd(uint8_t mbox, uint16_t unknown, uint8_t data_sync_map) {
+    wmi_synchronize_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_synchronize_cmd_t) - 6;
+    cmd.header.reserved = unknown;
+    cmd.header.cmd = WMI_SYNCHRONIZE_CMD;
+
+    cmd.data_sync_map = data_sync_map;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_create_pstream_cmd(uint8_t mbox, wmi_create_pstream_cmd_t* cmd) {
+    cmd->header.type = MBOX_SEND_TYPE_WMI;
+    cmd->header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd->header.len = sizeof(wmi_create_pstream_cmd_t) - 6;
+    cmd->header.cmd = WMI_CREATE_PSTREAM_CMD;
+
+    sdio_send_wmi_cmd(mbox, &cmd->header);
+}
+
 void sdio_wmi_start_scan_cmd(uint8_t mbox, uint8_t type) {
     wmi_start_scan_cmd_t cmd = {0};
     cmd.header.type = MBOX_SEND_TYPE_WMI;
@@ -418,6 +488,18 @@ void sdio_wmi_set_probed_ssid_cmd(uint8_t mbox, uint8_t flag, char* ssid) {
     sdio_send_wmi_cmd(mbox, &cmd.header);
 }
 
+void sdio_wmi_set_disconnect_timeout_cmd(uint8_t mbox, uint8_t timeout) {
+    wmi_set_disconnect_timeout_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_disconnect_timeout_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_DISCONNECT_TIMEOUT_CMD;
+
+    cmd.disconnect_timeout = timeout;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
 void sdio_wmi_set_channel_params_cmd(uint8_t mbox, uint8_t scan_param, uint8_t phy_mode, uint8_t n_channels, uint16_t* channels) {
     wmi_set_channel_params_cmd_t cmd = {0};
     cmd.header.type = MBOX_SEND_TYPE_WMI;
@@ -430,6 +512,18 @@ void sdio_wmi_set_channel_params_cmd(uint8_t mbox, uint8_t scan_param, uint8_t p
     cmd.num_channels = n_channels;
     for(size_t i = 0; i < n_channels; i++)
         cmd.channels[i] = channels[i];
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_power_mode_cmd(uint8_t mbox, uint8_t power_mode) {
+    wmi_set_power_mode_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_power_mode_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_POWER_MODE_CMD;
+
+    cmd.power_mode = power_mode;
 
     sdio_send_wmi_cmd(mbox, &cmd.header);
 }
@@ -456,6 +550,30 @@ void sdio_wmi_error_report_cmd(uint8_t mbox, uint32_t bitmask) {
     sdio_send_wmi_cmd(mbox, &cmd.header);
 }
 
+void sdio_wmi_set_keepalive_cmd(uint8_t mbox, uint8_t interval) {
+    wmi_set_keepalive_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_keepalive_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_KEEPALIVE_CMD;
+
+    cmd.keepalive_interval = interval;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_wsc_status_cmd(uint8_t mbox, uint8_t undocumented) {
+    wmi_set_wsc_status_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_wsc_status_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_WSC_STATUS_CMD;
+
+    cmd.undocumented = undocumented;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
 void sdio_wmi_start_whatever_timer_cmd(uint8_t mbox, uint32_t time) {
     wmi_start_whatever_timer_cmd_t cmd = {0};
     cmd.header.type = MBOX_SEND_TYPE_WMI;
@@ -464,6 +582,34 @@ void sdio_wmi_start_whatever_timer_cmd(uint8_t mbox, uint32_t time) {
     cmd.header.cmd = WMI_START_WHATEVER_TIMER_CMD;
 
     cmd.time = time;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_framerates_cmd(uint8_t mbox, uint8_t enable_mask, uint8_t frame_type, uint32_t frame_type_mask) {
+    wmi_set_framerates_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_framerates_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_FRAMERATES_CMD;
+
+    cmd.enable_mask = enable_mask;
+    cmd.frame_type = frame_type;
+    cmd.frame_rate_mask = frame_type_mask;
+
+    sdio_send_wmi_cmd(mbox, &cmd.header);
+}
+
+void sdio_wmi_set_bitrate_cmd(uint8_t mbox, uint8_t rate_index, uint8_t management_rate, uint8_t control_rate) {
+    wmi_set_bitrate_cmd_t cmd = {0};
+    cmd.header.type = MBOX_SEND_TYPE_WMI;
+    cmd.header.flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    cmd.header.len = sizeof(wmi_set_bitrate_cmd_t) - 6;
+    cmd.header.cmd = WMI_SET_BITRATE_CMD;
+
+    cmd.rate_index = rate_index;
+    cmd.management_rate_index = management_rate;
+    cmd.control_rate_index = control_rate;
 
     sdio_send_wmi_cmd(mbox, &cmd.header);
 }
@@ -488,14 +634,15 @@ void get_next_scan_channel() {
     while(true) {
         uint8_t item = boot_channel_list[index];
         if(item == 0) {
-            boot_channel_wait += boot_channel_wait;
+            panic("hi");
+            /*boot_channel_wait += boot_channel_wait;
 
             if(boot_channel_wait > 7)
                 boot_channel_wait = 7;
 
-            extern sgWifiAp_t access_points[2];
+            extern WifiAp_t access_points[6];
 
-            for(size_t i = 0; i < 2; i++) {
+            for(size_t i = 0; i < 6; i++) {
                 if(!(access_points[i].flags & sgWifiAp_FLAGS_ACTIVE))
                     continue;
 
@@ -508,7 +655,7 @@ void get_next_scan_channel() {
             }
 
             index = 0;
-            continue;
+            continue;*/
         }
 
         boot_channel_index = index + 1;
@@ -575,4 +722,100 @@ void sdio_wmi_scan_channel(void) {
     do {
         sdio_poll_mbox(0);
     } while(ath_await_scan_complete != 0);
+}
+
+void sdio_wmi_connect(void) {
+    sdio_wmi_set_bss_filter_cmd(0, BSS_FILTER_CURRENT_BSS, 0);
+
+    wmi_set_scan_params_cmd_t cmd = {0};
+    cmd.fg_start_period = 0xFFFF;
+    cmd.fg_end_period = 0xFFFF;
+    cmd.bg_period = 0xFFFF;
+    cmd.maxact_chdwell_time = 0xC8;
+    cmd.pas_chdwell_time = 0xC8;
+    cmd.short_scan_ratio = 0;
+    cmd.scan_control_flags = 5;
+    cmd.minact_chdwell_time = 0xC8;
+    cmd.maxact_scan_per_ssid = 0x0;
+    cmd.max_dfsch_act_time = 0x0;
+
+    sdio_wmi_set_scan_params_cmd(0, &cmd);
+
+    extern bool ap_found;
+    extern uint8_t ap_index;
+    extern WifiAp_t access_points[6];
+
+    extern uint16_t current_channel;
+
+    requested_channel = access_points[ap_index].channel;
+    current_channel = access_points[ap_index].channel;
+
+    channel_to_mhz(current_channel);
+
+    uint16_t channels[1] = {0};
+    channels[0] = channel_to_mhz(current_channel);
+
+    sdio_wmi_set_channel_params_cmd(0, 0, PHY_MODE_11G, 1, channels);
+
+    // TODO(thom_tl): Don't assume the network is open
+
+    sdio_wmi_set_bitrate_cmd(0, 0xFF, 0, 0);
+    sdio_wmi_set_framerates_cmd(0, 1, 0xA4, 0xFFF7);
+    sdio_wmi_synchronize_cmd(0, 0x2008, 0);
+    sdio_wmi_set_power_mode_cmd(0, 2);
+    sdio_wmi_synchronize_cmd(0, 0, 0);
+
+    wmi_create_pstream_cmd_t pstream = {0};
+    pstream.min_service_int = 0x14;
+    pstream.max_service_int = 0x14;
+    pstream.inactivity_int = 0x98967F;
+    pstream.suspension_time = 0xFFFFFFFF;
+    pstream.service_start_time = 0;
+    pstream.min_data_rate = 0x14500;
+    pstream.mean_data_rate = 0x14500;
+    pstream.peak_data_rate = 0x14500;
+    pstream.max_burst_size = 0;
+    pstream.delay_bound = 0;
+    pstream.min_phy_rate = 0x5B8D80;
+    pstream.sba = 0x2000;
+    pstream.medium_time = 0;
+    pstream.nominal_msdu = 0x80D0;
+    pstream.max_msdu = 0xD0;
+    pstream.traffic_class = 0;
+    pstream.traffic_direction = 0x02;
+    pstream.rx_queue_num = 0xFF;
+    pstream.traffic_type = 1;
+    pstream.voice_ps_capability = 0;
+    pstream.tsid = 5;
+    pstream.user_priority = 0;
+
+    sdio_wmi_create_pstream_cmd(0, &pstream);
+    sdio_wmi_set_wsc_status_cmd(0, 0);
+    sdio_wmi_set_disconnect_timeout_cmd(0, 2);
+    sdio_wmi_set_keepalive_cmd(0, 0);
+
+    ath_await_connect_complete = 1;
+
+    wmi_connect_cmd_t connect = {0};
+    connect.network_type = 1;
+    connect.dot11_auth_mode = 1;
+    connect.auth_mode = 1;
+    connect.pairwise_crypto_type = 1;
+    connect.pairwise_cypto_len = 0;
+    connect.group_crypto_type = 1;
+    connect.group_crypto_len = 0;
+    connect.ssid_length = access_points[ap_index].ssid_len;
+    memcpy(connect.ssid, access_points[ap_index].ssid, access_points[ap_index].ssid_len);
+
+    connect.channel = channels[0];
+    memcpy(connect.bssid, access_points[ap_index].bssid, 6);
+
+    connect.control_flags = 0;
+
+    sdio_wmi_connect_cmd(0, &connect);
+    print("sdio_wmi_connect_cmd()\n");
+
+    do {
+        sdio_poll_mbox(0);
+    } while(ath_await_connect_complete != 0);
 }

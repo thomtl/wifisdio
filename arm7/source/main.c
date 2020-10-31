@@ -66,6 +66,8 @@ int main() {
 
 	sdio_init();
 
+	print("sdio initialized\n");
+
 	while (!exitflag) {
 		if ((REG_KEYINPUT & KEY_START) == 0)
 			exitflag = true;
