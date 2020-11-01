@@ -34,6 +34,20 @@ typedef struct {
     uint8_t unknown;
 } __attribute__((packed)) wmi_mbox_recv_header_t;
 
+typedef struct {
+    uint8_t type;
+    uint8_t flags;
+    uint16_t len;
+    uint8_t ack_len;
+    uint8_t unknown;
+    uint8_t rssi;
+    uint8_t unknown2;
+    uint8_t destination_mac[6];
+    uint8_t source_mac[6];
+    uint16_t network_len;
+    uint8_t body[];
+} __attribute__((packed)) wmi_mbox_recv_data_header_t;
+
 #define MBOX_RECV_TYPE_ACK_ONLY 0
 #define MBOX_RECV_TYPE_WMI_EVENT 1
 #define MBOX_RECV_TYPE_DATA_PACKET 2
@@ -70,6 +84,7 @@ typedef struct {
 #define WMI_DISCONNECT_EVENT 0x1003
 #define WMI_BSSINFO_EVENT 0x1004
 #define WMI_REGDOMAIN_EVENT 0x1006
+#define WMI_NEIGHBOR_REPORT_EVENT 0x1008
 #define WMI_SCAN_COMPLETE_EVENT 0x100A
 #define WMI_EXTENSION_EVENT 0x1010
 

@@ -364,16 +364,3 @@ void sdio_init(void) {
 
     sdio_wmi_connect();
 }
-
-void sdio_tx_packet(uint8_t* destination_mac, wmi_mbox_data_send_header_t* packet, uint16_t len, uint16_t body_len) {
-    packet->type = MBOX_SEND_TYPE_DATA;
-    packet->flags = MBOX_SEND_FLAGS_REQUEST_ACK;
-    packet->len = len - 6;
-
-    memcpy(packet->dest_mac, destination_mac, 6);
-    memcpy(packet->source_mac, device_mac, 6);
-
-    packet->network_len = htons(body_len);
-
-    sdio_send_wmi_data(packet);
-}

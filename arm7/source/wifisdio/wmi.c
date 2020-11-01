@@ -2,10 +2,13 @@
 #include "wmi.h"
 #include "wifi.h"
 
+#include "net/base.h"
+
 #include "sdio.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 uint8_t ath_cmd_ack_pending = 0;
 uint8_t ath_data_ack_pending = 0;
@@ -78,16 +81,52 @@ void sdio_tx_callback(void) {
     *curr_wpa_tx_callback_list_ptr = 0;
 }
 
-void sdio_Wifi_Intr_TxEnd(void) {
-    // TODO
-}
-
 void sdio_Wifi_Intr_RxEapolEnd(void) {
     panic("sdio_Wifi_Intr_RxEapolEnd()\n");
 }
 
 void sdio_Wifi_Intr_RxEnd(void) {
-    panic("sdio_Wifi_Intr_RxEnd()\n");
+    wmi_mbox_recv_data_header_t* packet = (wmi_mbox_recv_data_header_t*)sdio_xfer_buf;
+
+    uint16_t len = packet->len - 0x10;
+    if(packet->flags & MBOX_RECV_FLAGS_HAS_ACK)
+        len -= packet->ack_len;
+    
+    uint32_t tmp = packet->network_len | (packet->network_len << 16);
+    tmp &= ~0xFF000000;
+    tmp >>= 8;
+    if(tmp != len)
+        panic("sdio_Wifi_Intr_RxEnd: Len mismatch\n");
+
+    net_handle_packet(packet->source_mac, packet->body, len);
+}
+
+void* tx_stack[10] = {NULL};
+uint8_t tx_stack_ptr = 0;
+void* tx_stack_pop(void) {
+    if(tx_stack_ptr > 0)
+        return tx_stack[--tx_stack_ptr];
+    else
+        return NULL; // No packet on stack
+}
+
+void tx_stack_push(void* packet) {
+    if(tx_stack_ptr == 9)
+        panic("TX Stack full\n");
+
+    tx_stack[tx_stack_ptr++] = packet;
+}
+
+void sdio_Wifi_Intr_TxEnd(void) {
+    if(ath_data_ack_pending != 0)
+        return;
+    
+    void* packet = tx_stack_pop();
+    if(!packet)
+        return;
+
+    sdio_send_wmi_data(packet);
+    free(packet);
 }
 
 void sdio_poll_mbox(uint8_t mbox) {
@@ -324,7 +363,7 @@ void sdio_poll_mbox(uint8_t mbox) {
                             case WIFI_MANAGEMENT_ELEMENT_ID_SSID: {
                                 //print("SSID: %.*s\n", item_len, &info->body[j]);
                                 ssid_len = item_len;
-                                ssid = &info->body[j];
+                                ssid = (char*)&info->body[j];
                                 break;
                             }
                             case WIFI_MANAGEMENT_ELEMENT_ID_RATE_SET: {
@@ -370,6 +409,7 @@ void sdio_poll_mbox(uint8_t mbox) {
                     regulatory_domain = regdomain;
                     break;
                 }
+                case WMI_NEIGHBOR_REPORT_EVENT: break;
                 case WMI_SCAN_COMPLETE_EVENT: {
                     ath_await_scan_complete = 0;
                     wmi_scan_complete_event_t* info = (wmi_scan_complete_event_t*)params;
@@ -400,11 +440,14 @@ void sdio_poll_mbox(uint8_t mbox) {
             }
         } else if(header->type == MBOX_RECV_TYPE_DATA_PACKET || header->type == 5) { // Occurs on 02acc2?
             uint16_t* data = (uint16_t*)sdio_xfer_buf;
-            leaveCriticalSection(old_ime); // !! remove this when implementing the funcs below
-            if(data[0xE] == PROTOCOL_ETHER_EAPOL)
+            if(data[0xE] == PROTOCOL_ETHER_EAPOL) {
+                leaveCriticalSection(old_ime);
                 sdio_Wifi_Intr_RxEapolEnd();
-            else
+            } else {
+                leaveCriticalSection(old_ime);
                 sdio_Wifi_Intr_RxEnd();
+                old_ime = enterCriticalSection();
+            }
         } else {
             leaveCriticalSection(old_ime);
             panic("sdio_poll_mbox(): Unknown recv header type\n");
@@ -890,10 +933,19 @@ void sdio_wmi_connect(void) {
 
 void sdio_send_wmi_data(wmi_mbox_data_send_header_t* packet) {
     ath_data_ack_pending = (packet->flags & MBOX_SEND_FLAGS_REQUEST_ACK) ? (1) : (0);
-
     sdio_send_mbox_block(0, (uint8_t*)packet);
+}
 
-    do {
-        sdio_poll_mbox(0);
-    } while(ath_data_ack_pending != 0);
+void sdio_tx_packet(uint8_t* destination_mac, wmi_mbox_data_send_header_t* packet, uint16_t len) {
+    packet->type = MBOX_SEND_TYPE_DATA;
+    packet->flags = MBOX_SEND_FLAGS_REQUEST_ACK;
+    packet->len = len - 6;
+
+    memcpy(packet->dest_mac, destination_mac, 6);
+
+    extern uint8_t device_mac[6];
+    memcpy(packet->source_mac, device_mac, 6);
+
+    packet->network_len = htons(packet->len - 0x10);
+    tx_stack_push(packet);
 }

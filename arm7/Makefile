@@ -15,7 +15,7 @@ include $(DEVKITARM)/ds_rules
 # all directories are relative to this makefile
 #---------------------------------------------------------------------------------
 BUILD		:=	build
-SOURCES		:=	source source/wifisdio
+SOURCES		:=	source source/wifisdio source/wifisdio/net
 INCLUDES	:=	include build
 DATA		:=
  
