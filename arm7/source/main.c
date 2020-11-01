@@ -69,7 +69,7 @@ int main() {
 	sdio_init();
 	print("SDIO: Init\n");
 
-	typedef struct {
+	/*typedef struct {
 		wmi_mbox_data_send_header_t header;
 		uint8_t llc_snap[6];
 		uint16_t protocol;
@@ -89,7 +89,9 @@ int main() {
 	uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 	sdio_tx_packet(broadcast_mac, &packet->header, sizeof(test_packet));
 
-	print("SDIO: Sent test packet\n");
+	free(packet);
+
+	print("SDIO: Sent test packet\n");*/
 
 
 	while (!exitflag) {

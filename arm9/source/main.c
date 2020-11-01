@@ -3,6 +3,7 @@
 
 int main(void) {
 	consoleDemoInit();
+	lcdSwap();
 
 	while(1) {
 		while(fifoCheckDatamsg(FIFO_USER_01)){

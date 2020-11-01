@@ -3,6 +3,7 @@
 #include "wifi.h"
 
 #include "net/base.h"
+#include "net/net_alloc.h"
 
 #include "sdio.h"
 
@@ -120,13 +121,13 @@ void tx_stack_push(void* packet) {
 void sdio_Wifi_Intr_TxEnd(void) {
     if(ath_data_ack_pending != 0)
         return;
-    
+
     void* packet = tx_stack_pop();
     if(!packet)
         return;
 
     sdio_send_wmi_data(packet);
-    free(packet);
+    net_free(packet);
 }
 
 void sdio_poll_mbox(uint8_t mbox) {

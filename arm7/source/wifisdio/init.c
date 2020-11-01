@@ -15,6 +15,7 @@ uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels = 0;
 TWL_BSS uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
 
 uint8_t device_mac[6];
+uint32_t device_ip;
 
 uint16_t current_channel = 0;
 WifiAp_t access_points[6];
@@ -363,4 +364,6 @@ void sdio_init(void) {
         sdio_wmi_scan_channel();
 
     sdio_wmi_connect();
+
+    device_ip = htonl((10 << 24) | (0 << 16) | (42 << 8) | 87);
 }

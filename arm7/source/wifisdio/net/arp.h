@@ -38,3 +38,6 @@ typedef struct {
 } __attribute__((packed)) arp_cache_entry_t;
 
 void arp_handle_packet(uint8_t* data, uint16_t len);
+
+void arp_request(uint32_t ip);
+uint8_t* arp_lookup(uint32_t ip);

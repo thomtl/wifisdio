@@ -5,21 +5,21 @@
 #include "../wmi.h"
 
 #include "arp.h"
+#include "ipv4.h"
+#include "net_alloc.h"
 
-#include <stdlib.h>
 #include <string.h>
+#include <nds.h>
 
 void net_handle_packet(uint8_t* src_mac, uint8_t* data, uint16_t len) {
     llc_snap_frame_t* frame = (llc_snap_frame_t*)data;
 
     if(frame->protocol == htons(PROTO_ARP))
         arp_handle_packet(frame->body, len - sizeof(llc_snap_frame_t));
+    else if(frame->protocol == htons(PROTO_IPv4))
+        ipv4_handle_packet(frame->body, len - sizeof(llc_snap_frame_t));
     else
         print("net: Unknown proto %x\n", htons(frame->protocol));
-    /*else if(frame->protocol == htons(0x806))
-        print("IPv4\n");
-    else
-        print("\n");*/
 }
 
 void net_send_packet(uint16_t proto, uint8_t* dest_mac, uint8_t* data, uint16_t len) {
@@ -28,7 +28,9 @@ void net_send_packet(uint16_t proto, uint8_t* dest_mac, uint8_t* data, uint16_t 
         llc_snap_frame_t llc;
     } __attribute__((packed)) frame_t;
 
-    frame_t* frame = malloc(sizeof(frame_t) + len);
+    frame_t* frame = net_malloc(sizeof(frame_t) + len);
+    if(!frame)
+        panic("net_send_packet(): Malloc failed\n");
     memset(frame, 0, sizeof(frame_t) + len);
 
     frame->llc.llc_snap[0] = 0xAA;

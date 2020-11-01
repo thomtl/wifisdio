@@ -8,7 +8,7 @@
 #include <string.h>
 #include <nds.h>
 
-TWL_BSS arp_cache_entry_t arp_cache[ARP_CACHE_LEN];
+TWL_BSS arp_cache_entry_t arp_cache[ARP_CACHE_LEN] = {0};
 
 int update_arp_cache(uint16_t hwtype, arp_ipv4_t* data) {
     for(size_t i = 0; i < ARP_CACHE_LEN; i++) {
@@ -21,7 +21,7 @@ int update_arp_cache(uint16_t hwtype, arp_ipv4_t* data) {
         }
     }
 
-    return -1;
+    return 0;
 }
 
 int insert_arp_cache(uint16_t hwtype, arp_ipv4_t* data) {
@@ -57,10 +57,10 @@ void arp_handle_packet(uint8_t* data, uint16_t len) {
 
     int merge = update_arp_cache(req->hw_type, arp_data);
     extern uint8_t device_mac[6];
-    //if(memcmp(device_mac, arp_data->dest_mac, 6) != 0)
+    if(memcmp(device_mac, arp_data->dest_mac, 6) != 0)
+        return; // Not for us
 
-
-    if(!merge && insert_arp_cache(req->hw_type, arp_data))
+    if(!merge && insert_arp_cache(req->hw_type, arp_data) != 0)
         panic("arp: No space in ARP cache\n");
 
     switch (req->op)
@@ -70,7 +70,8 @@ void arp_handle_packet(uint8_t* data, uint16_t len) {
         arp_data->dest_ip = arp_data->source_ip;
 
         memcpy(arp_data->source_mac, device_mac, 6);
-        arp_data->source_ip = 0x0;
+        extern uint32_t device_ip;
+        arp_data->source_ip = device_ip;
 
         req->op = ARP_OP_REPLY;
 
@@ -83,7 +84,43 @@ void arp_handle_packet(uint8_t* data, uint16_t len) {
     }
         
     default:
-        panic("arp: Unknown op %x\n", req->op);
+        print("arp: Unknown op %x\n", req->op);
         break;
     }
+}
+
+void arp_request(uint32_t ip) {
+    typedef struct {
+        arp_request_t req;
+        arp_ipv4_t ip;
+    } __attribute__((packed)) request_t;
+
+    request_t req = {0};
+
+    req.req.op = htons(ARP_OP_REQUEST);
+    req.req.hw_type = htons(ARP_HWTYPE_ETHERNET);
+    req.req.proto_type = htons(PROTO_IPv4);
+    req.req.hw_addr_len = 6;
+    req.req.proto_addr_len = 4;
+
+    req.ip.dest_ip = htonl(ip);
+
+    extern uint8_t device_mac[6];
+    memcpy(req.ip.source_mac, device_mac, 6);
+    extern uint32_t device_ip;
+    req.ip.source_ip = device_ip;
+
+    uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    
+    net_send_packet(PROTO_ARP, broadcast_mac, &req, sizeof(request_t));
+}
+
+uint8_t* arp_lookup(uint32_t ip) {
+    ip = htonl(ip);
+    for(size_t i = 0; i < ARP_CACHE_LEN; i++)
+        if(arp_cache[i].state == ARP_CACHE_RESOLVED)
+            if(arp_cache[i].ip == ip)
+                return arp_cache[i].mac;
+
+    return NULL;
 }

@@ -1,10 +1,13 @@
 # WIFISDIO
-Port of nocash's [wifiboot's](https://problemkaputt.de/wifiboot.htm) wifisdio driver to C, in order to provide a normal API of accessing and to learn how it works
+Port of nocash's [wifiboot](https://problemkaputt.de/wifiboot.htm) wifisdio driver to C, in order to provide a normal API and to learn how it works.
 
-#### Done
-`sdio_atheros_init()`
+##### Done
+- SDIO Initialization
+- SDIO Channel scanning + BSS Connect
+- ARP + IPv4 + ICMP
 
-#### TODO
-`event handling`
-`packet send receive`
-`WEP + WPA + WPA2`
+##### TODO
+- IRQ Event handling
+- UDP + TCP + DHCP
+- WEP Testing
+- WPA + WPA2
