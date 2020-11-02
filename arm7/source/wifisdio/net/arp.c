@@ -56,8 +56,8 @@ void arp_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
     arp_ipv4_t* arp_data = (arp_ipv4_t*)req->body;
 
     int merge = update_arp_cache(req->hw_type, arp_data);
-    extern uint8_t device_mac[6];
-    if(memcmp(device_mac, arp_data->dest_mac, 6) != 0)
+    extern uint32_t device_ip;
+    if(arp_data->dest_ip != device_ip)
         return; // Not for us
 
     if(!merge && insert_arp_cache(req->hw_type, arp_data) != 0)
@@ -69,8 +69,8 @@ void arp_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
         memcpy(arp_data->dest_mac, arp_data->source_mac, 6);
         arp_data->dest_ip = arp_data->source_ip;
 
+        extern uint8_t device_mac[6];
         memcpy(arp_data->source_mac, device_mac, 6);
-        extern uint32_t device_ip;
         arp_data->source_ip = device_ip;
 
         req->op = ARP_OP_REPLY;
@@ -79,12 +79,16 @@ void arp_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
         req->hw_type = htons(req->hw_type);
         req->proto_type = htons(req->proto_type);
 
-        net_send_packet(PROTO_ARP, arp_data->dest_mac, req, sizeof(arp_request_t) + sizeof(arp_ipv4_t));
+        net_address_t target = {0};
+        memcpy(target.mac, arp_data->dest_mac, 6);
+
+        net_send_packet(PROTO_ARP, &target, req, sizeof(arp_request_t) + sizeof(arp_ipv4_t));
         break;
     }
-        
+    case ARP_OP_REPLY: break; // Just ignore replies here, already handled above
+
     default:
-        print("arp: Unknown op %x\n", req->op);
+        print("arp: Unknown op %x\n", req->op); // TODO(thom_tl): Is this Reverse ARP? Should we handle that?
         break;
     }
 }
