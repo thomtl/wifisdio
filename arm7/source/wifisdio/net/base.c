@@ -13,16 +13,19 @@
 
 void net_handle_packet(uint8_t* src_mac, uint8_t* data, uint16_t len) {
     llc_snap_frame_t* frame = (llc_snap_frame_t*)data;
+    
+    net_address_t source = {0};
+    memcpy(source.mac, src_mac, 6);
 
     if(frame->protocol == htons(PROTO_ARP))
-        arp_handle_packet(frame->body, len - sizeof(llc_snap_frame_t));
+        arp_handle_packet(&source, frame->body, len - sizeof(llc_snap_frame_t));
     else if(frame->protocol == htons(PROTO_IPv4))
-        ipv4_handle_packet(frame->body, len - sizeof(llc_snap_frame_t));
+        ipv4_handle_packet(&source, frame->body, len - sizeof(llc_snap_frame_t));
     else
         print("net: Unknown proto %x\n", htons(frame->protocol));
 }
 
-void net_send_packet(uint16_t proto, uint8_t* dest_mac, uint8_t* data, uint16_t len) {
+void net_send_packet(uint16_t proto, net_address_t* target, uint8_t* data, uint16_t len) {
     typedef struct {
         wmi_mbox_data_send_header_t header;
         llc_snap_frame_t llc;
@@ -41,5 +44,5 @@ void net_send_packet(uint16_t proto, uint8_t* dest_mac, uint8_t* data, uint16_t 
 
     memcpy(frame->llc.body, data, len);
 
-    sdio_tx_packet(dest_mac, &frame->header, sizeof(frame_t) + len);
+    sdio_tx_packet(target->mac, &frame->header, sizeof(frame_t) + len);
 }

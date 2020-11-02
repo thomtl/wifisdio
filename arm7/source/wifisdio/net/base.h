@@ -12,5 +12,10 @@ typedef struct {
 #define PROTO_IPv4 0x800
 #define PROTO_ARP 0x806
 
+typedef struct {
+    uint8_t mac[6];
+    uint32_t ip;
+} __attribute__((packed)) net_address_t;
+
 void net_handle_packet(uint8_t* src_mac, uint8_t* data, uint16_t len);
-void net_send_packet(uint16_t proto, uint8_t* dest_mac, uint8_t* data, uint16_t len);
+void net_send_packet(uint16_t proto, net_address_t* target, uint8_t* data, uint16_t len);

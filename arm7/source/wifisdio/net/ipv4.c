@@ -26,7 +26,7 @@ uint16_t ipv4_checksum(void* addr, size_t count) {
     return ~sum;
 }
 
-void ipv4_handle_packet(uint8_t* data, uint16_t len) {
+void ipv4_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
     ipv4_frame_t* frame = (ipv4_frame_t*)data;
     
     if((frame->type >> 4) != IPv4_VERSION)
@@ -46,14 +46,16 @@ void ipv4_handle_packet(uint8_t* data, uint16_t len) {
     frame->len = htons(frame->len);
     frame->id = htons(frame->id);
 
+    source->ip = frame->source_ip; // We just got the source IP, pass it along to the lower layers
+
     size_t body_len = frame->len - ((frame->type & 0xF) * 4);
     if(frame->proto == IPv4_PROTO_ICMP)
-        icmp_handle_packet(frame, frame->body, body_len);
+        icmp_handle_packet(source, frame->body, body_len);
     else
         print("ipv4: Unknown proto 0x%x\n", frame->proto);
 }
 
-void ipv4_send_packet(uint32_t dest_ip, uint8_t proto, uint8_t* data, size_t data_len) {
+void ipv4_send_packet(net_address_t* target, uint8_t proto, uint8_t* data, size_t data_len) {
     size_t total_len = sizeof(ipv4_frame_t) + data_len;
     
     ipv4_frame_t* frame = net_malloc(total_len);
@@ -73,21 +75,30 @@ void ipv4_send_packet(uint32_t dest_ip, uint8_t proto, uint8_t* data, size_t dat
 
     extern uint32_t device_ip;
     frame->source_ip = device_ip;
-    frame->dest_ip = htonl(dest_ip);
+    frame->dest_ip = htonl(target->ip);
     frame->len = htons(total_len);
 
     frame->checksum = ipv4_checksum(frame, 5 * 4);
     memcpy(frame->body, data, data_len);
 
-    uint8_t* mac = arp_lookup(dest_ip);
-    if(!mac) {
-        arp_request(dest_ip);
-        net_free(frame);
+    // Caller does not know target MAC, lookup in ARP cache or send ARP request
+    uint8_t null_mac[6] = {0};
+    if(memcmp(target->mac, null_mac, 6) == 0) {
+        uint8_t* mac = arp_lookup(target->ip);
+        if(!mac) {
+            arp_request(target->ip);
+            net_free(frame);
 
-        return;
+            // TODO(thom_tl): We are discarding this message, thats probably a bad idea
+            return;
+        }
+
+        memcpy(target->mac, mac, 6);
     }
 
-    net_send_packet(PROTO_IPv4, mac, frame, total_len);
+    
+
+    net_send_packet(PROTO_IPv4, target, frame, total_len);
 
     net_free(frame);
 }

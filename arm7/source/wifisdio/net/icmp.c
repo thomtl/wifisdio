@@ -3,7 +3,9 @@
 #include "../wifisdio.h"
 #include "../wifi.h"
 
-void icmp_handle_packet(ipv4_frame_t* header, uint8_t* body, size_t body_len) {
+#include <string.h>
+
+void icmp_handle_packet(net_address_t* source, uint8_t* body, size_t body_len) {
     icmpv4_frame_t* frame = (icmpv4_frame_t*)body;
 
     if(ipv4_checksum(body, body_len))
@@ -17,7 +19,12 @@ void icmp_handle_packet(ipv4_frame_t* header, uint8_t* body, size_t body_len) {
 
         frame->checksum = 0;
         frame->checksum = ipv4_checksum(frame, body_len);
-        ipv4_send_packet(header->source_ip, IPv4_PROTO_ICMP, frame, body_len);
+
+        net_address_t target = {0};
+        memcpy(target.mac, source->mac, 6);
+        target.ip = source->ip;        
+
+        ipv4_send_packet(&target, IPv4_PROTO_ICMP, frame, body_len);
         break;
     }
 

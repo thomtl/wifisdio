@@ -40,7 +40,7 @@ int insert_arp_cache(uint16_t hwtype, arp_ipv4_t* data) {
     return -1;
 }
 
-void arp_handle_packet(uint8_t* data, uint16_t len) {
+void arp_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
     arp_request_t* req = (arp_request_t*)data;
 
     req->op = htons(req->op);
@@ -111,8 +111,10 @@ void arp_request(uint32_t ip) {
     req.ip.source_ip = device_ip;
 
     uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    net_address_t target = {0};
+    memcpy(target.mac, broadcast_mac, 6);
     
-    net_send_packet(PROTO_ARP, broadcast_mac, &req, sizeof(request_t));
+    net_send_packet(PROTO_ARP, &target, &req, sizeof(request_t));
 }
 
 uint8_t* arp_lookup(uint32_t ip) {

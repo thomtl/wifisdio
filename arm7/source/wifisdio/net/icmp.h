@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "base.h"
 #include "ipv4.h"
 
 typedef struct {
@@ -21,4 +22,4 @@ typedef struct {
 #define ICMPv4_TYPE_ECHO_REPLY 0
 #define ICMPv4_TYPE_ECHO_REQUEST 8
 
-void icmp_handle_packet(ipv4_frame_t* header, uint8_t* body, size_t body_len);
+void icmp_handle_packet(net_address_t* source, uint8_t* body, size_t body_len);
