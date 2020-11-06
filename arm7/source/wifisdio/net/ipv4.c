@@ -4,6 +4,8 @@
 #include "../wifi.h"
 
 #include "icmp.h"
+#include "udp.h"
+
 #include "arp.h"
 #include "base.h"
 #include "net_alloc.h"
@@ -51,6 +53,8 @@ void ipv4_handle_packet(net_address_t* source, uint8_t* data, uint16_t len) {
     size_t body_len = frame->len - ((frame->type & 0xF) * 4);
     if(frame->proto == IPv4_PROTO_ICMP)
         icmp_handle_packet(source, frame->body, body_len);
+    else if(frame->proto == IPv4_PROTO_UDP)
+        udp_handle_packet(source, frame->body, body_len);
     else
         print("ipv4: Unknown proto 0x%x\n", frame->proto);
 }
@@ -95,8 +99,6 @@ void ipv4_send_packet(net_address_t* target, uint8_t proto, uint8_t* data, size_
 
         memcpy(target->mac, mac, 6);
     }
-
-    
 
     net_send_packet(PROTO_IPv4, target, frame, total_len);
 

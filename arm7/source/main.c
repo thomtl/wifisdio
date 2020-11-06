@@ -6,6 +6,7 @@
 
 #include "wifisdio/wifisdio.h"
 #include "wifisdio/wmi.h"
+#include "wifisdio/net/udp.h"
 
 volatile bool exitflag = false;
 volatile uint32_t arm7_count_60hz = 0;
@@ -40,7 +41,7 @@ void put(const char* s) {
 }
 
 
-char print_buf[100] = {0};
+TWL_BSS char print_buf[100] = {0};
 
 void print(const char* s, ...){
 	va_list va;
@@ -68,31 +69,6 @@ int main() {
 
 	sdio_init();
 	print("SDIO: Init\n");
-
-	/*typedef struct {
-		wmi_mbox_data_send_header_t header;
-		uint8_t llc_snap[6];
-		uint16_t protocol;
-		char data[25];
-	} __attribute__((packed)) test_packet;
-
-	test_packet* packet = malloc(sizeof(test_packet));
-	memset(packet, 0, sizeof(test_packet));
-	packet->llc_snap[0] = 0xAA;
-	packet->llc_snap[1] = 0xAA;
-	packet->llc_snap[2] = 0x3;
-
-	packet->protocol = 0;
-
-	strncpy(packet->data, "Hello DSiWifi World", 25);
-
-	uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-	sdio_tx_packet(broadcast_mac, &packet->header, sizeof(test_packet));
-
-	free(packet);
-
-	print("SDIO: Sent test packet\n");*/
-
 
 	while (!exitflag) {
 		sdio_poll_mbox(0);

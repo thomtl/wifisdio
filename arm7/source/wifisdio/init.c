@@ -12,13 +12,13 @@
 // Globals
 uint32_t chip_id, rom_version, regulatory_domain, regulatory_channels = 0;
 //uint8_t twlcfg_etc_buf[0x214] = {0};
-TWL_BSS uint32_t sdio_xfer_buf[0xA00 + 14 + 2];
+TWL_BSS uint32_t sdio_xfer_buf[0xA00];
 
 uint8_t device_mac[6];
 uint32_t device_ip;
 
 uint16_t current_channel = 0;
-WifiAp_t access_points[6];
+TWL_BSS WifiAp_t access_points[6];
 
 bool ap_found = false;
 uint8_t ap_index = 0;

@@ -15,6 +15,7 @@ typedef struct {
 typedef struct {
     uint8_t mac[6];
     uint32_t ip;
+    uint16_t port;
 } __attribute__((packed)) net_address_t;
 
 void net_handle_packet(uint8_t* src_mac, uint8_t* data, uint16_t len);
